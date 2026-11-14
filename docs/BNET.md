@@ -148,7 +148,7 @@ Mid-game vs bio: keep at least `max(4, dragoons)` zealots with leg enhancements 
 
 ## Phase 3: Build script and summary log
 
-- `scripts/build-bnet.ps1`: configures with `-G "Visual Studio 17 2022" -A Win32 -DTOURNAMENT_BUILD=ON` (which also skips the `windbg` target), builds only the `Stardust` target in Release, and copies `Stardust.dll` plus `config/stardust_bnet.json` to `dist/bwapi-data/AI/`. An existing `dist/.../stardust_bnet.json` is kept unless `-OverwriteConfig`; the defaults are always written to `stardust_bnet.default.json`. Options: `-Clean`, `-VsHuman`, `-NoBnetLog`, `-BuildDir`, `-DistDir`.
+- `scripts/build-bnet.ps1`: configures with the newest installed Visual Studio 2022 (`-G "Visual Studio 17 2022"`) or 2026 (`-G "Visual Studio 18 2026"`, needs CMake 4.2+; the CMake bundled with Visual Studio is preferred), `-A Win32 -DTOURNAMENT_BUILD=ON` (which also skips the `windbg` target), builds only the `Stardust` target in Release, and copies `Stardust.dll` plus `config/stardust_bnet.json` to `dist/bwapi-data/AI/`. An existing `dist/.../stardust_bnet.json` is kept unless `-OverwriteConfig`; the defaults are always written to `stardust_bnet.default.json`. Options: `-Clean`, `-VsHuman`, `-NoBnetLog`, `-BuildDir`, `-DistDir`, `-Generator` (override). A build dir configured with a different generator is rejected; use `-Clean`.
 - CMake option `BNET_LOG` (default `ON`) compiles the summary log in, independent of `LOGGING_ENABLED` (which `TOURNAMENT_BUILD` turns off). Runtime switch: `bnet_log`.
 - Log file `bwapi-data/write/stardust_bnet.log`, appended, one line per event, flushed immediately:
 
