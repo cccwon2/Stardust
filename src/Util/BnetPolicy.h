@@ -303,6 +303,8 @@ namespace BnetPolicy
         int tolerance;              // move_resend_tolerance_px
         int framesSinceLastCommand;
         int interval;               // Effective command interval in frames
+        int distUnitToLastTarget = 1 << 20;   // Distance from the unit to the last move target (px)
+        int minRemainingPx = 0;               // Only skip while the unit still has at least this far to go
     };
 
     // Whether a non-worker move to (nearly) the same target as the last move should be skipped because it was sent
@@ -313,6 +315,101 @@ namespace BnetPolicy
         if (!in.enabled || in.force || in.stuck || !in.lastWasMove) return false;
         if (in.interval <= 0) return false;
         if (in.distToLastTarget > in.tolerance) return false;
+        // Never let the unit run out of path: once it is close to its last target, accept the new one immediately
+        if (in.distUnitToLastTarget < in.minRemainingPx) return false;
         return in.framesSinceLastCommand < in.interval;
+    }
+
+    // Effective interval for the non-worker move guard: only active when the latency-based command interval is active
+    // (Battle.net), then at least combat_move_interval_frames, or observer_move_interval_frames for observers.
+    inline int combatMoveInterval(int commandInterval, int combatInterval, int observerInterval, bool isObserver)
+    {
+        if (commandInterval <= 0) return 0;
+        int result = commandInterval;
+        if (combatInterval > result) result = combatInterval;
+        if (isObserver && observerInterval > result) result = observerInterval;
+        return result;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Grid waypoint hold
+    // ---------------------------------------------------------------------------------------------
+
+    // Upstream grid navigation moves towards the node 5 tiles ahead and re-targets every time the unit enters a new tile,
+    // i.e. one move per tile (~every 6-8 frames for a dragoon). Keep the current waypoint while it is still on the path
+    // ahead and the unit is not yet close to it, so the move is only refreshed every few tiles.
+    struct GridHoldInput
+    {
+        bool enabled;               // grid_waypoint_hold and Battle.net command interval active
+        bool waypointOnPath;        // Current waypoint is one of the next nodes from the unit's current grid node
+        bool nearGoal;              // Current grid node is close to the grid goal (switch to the final target soon)
+        int distToWaypoint;         // Distance from the unit to the current waypoint (px)
+        int refreshPx;              // grid_waypoint_refresh_px
+    };
+
+    inline bool holdGridWaypoint(const GridHoldInput &in)
+    {
+        if (!in.enabled || !in.waypointOnPath || in.nearGoal) return false;
+        return in.distToWaypoint > in.refreshPx;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Repeated spell / unload guard
+    // ---------------------------------------------------------------------------------------------
+
+    // Whether the same targeted order (stasis, unload) was sent recently enough that re-sending it now only adds APM.
+    // Upstream re-sent stasis every frame (148 casts in one replay) and shuttle unloads every frame.
+    inline bool skipRepeatedOrder(bool enabled, bool sameOrder, int distToLastTarget, int tolerance, int framesSinceLastCommand,
+                                  int interval)
+    {
+        if (!enabled || !sameOrder || interval <= 0) return false;
+        if (distToLastTarget > tolerance) return false;
+        return framesSinceLastCommand < interval;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Stuck worker backoff
+    // ---------------------------------------------------------------------------------------------
+
+    // Frames to wait after an unstick stop before the next normal command, given how many consecutive unstick attempts
+    // were made without the unit moving. Upstream retried every ~12 frames forever (a trapped probe sent 323 stops and
+    // 619 moves in 3 minutes). The first two attempts keep upstream timing; then 24, 48, 96, capped at maxFrames.
+    inline int unstickBackoffFrames(int consecutiveAttempts, int baseFrames, int maxFrames)
+    {
+        if (consecutiveAttempts <= 2) return baseFrames;
+        int wait = 24;
+        for (int i = 3; i < consecutiveAttempts && wait < maxFrames; i++) wait *= 2;
+        if (wait > maxFrames) wait = maxFrames;
+        return wait > baseFrames ? wait : baseFrames;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Expansion / natural cannons vs. mech
+    // ---------------------------------------------------------------------------------------------
+
+    enum class CannonBaseKind { Main, Natural, Expansion };
+
+    // Target cannon count for a base. Natural: natural_cannons, raised to mech_natural_cannons under a mech / vulture threat.
+    // Main: main_cannons under a mech threat. Other bases: expansion_cannons under a mech threat.
+    inline int cannonTarget(CannonBaseKind kind, bool mechThreat, int naturalCannons, int mechNaturalCannons, int mainCannons,
+                            int expansionCannons)
+    {
+        switch (kind)
+        {
+            case CannonBaseKind::Natural:
+                return (mechThreat && mechNaturalCannons > naturalCannons) ? mechNaturalCannons : naturalCannons;
+            case CannonBaseKind::Main:
+                return mechThreat ? mainCannons : 0;
+            case CannonBaseKind::Expansion:
+                return mechThreat ? expansionCannons : 0;
+        }
+        return 0;
+    }
+
+    // Whether the next cannon request at a base should be raised above army production: only the first cannon of a base
+    // that has none completed or pending, and only under a vulture / mech threat.
+    inline bool cannonRequestUrgent(bool threatPriority, bool mechThreat, int existingOrPending, int requestIndex)
+    {
+        return threatPriority && mechThreat && existingOrPending + requestIndex == 0;
     }
 }

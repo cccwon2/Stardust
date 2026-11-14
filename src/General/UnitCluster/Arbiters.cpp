@@ -8,6 +8,9 @@
 #include "NoGoAreas.h"
 
 #include "DebugFlag_UnitOrders.h"
+#include "BnetConfig.h"
+#include "BnetLog.h"
+#include "BnetPolicy.h"
 
 /*
  * This file controls arbiters that are assigned to a squad. Other special team usages of arbiters would be in a Play.
@@ -165,6 +168,22 @@ void Squad::executeArbiters()
 #if DEBUG_UNIT_ORDERS
             CherryVis::log(arbiter->id) << "Order: Stasis at " << BWAPI::WalkPosition(stasisPosition);
 #endif
+
+            // Battle.net: upstream re-sent the stasis order every frame (148 casts in one replay); don't re-send the
+            // same cast while it is still in flight (spell_resend_interval_frames)
+            BWAPI::UnitCommand currentCommand(arbiter->bwapiUnit->getLastCommand());
+            bool sameCast = currentCommand.getType() == BWAPI::UnitCommandTypes::Use_Tech_Position &&
+                            currentCommand.getTechType() == BWAPI::TechTypes::Stasis_Field;
+            if (BnetPolicy::skipRepeatedOrder(BnetConfig::commandIntervalFrames() > 0,
+                                              sameCast,
+                                              sameCast ? currentCommand.getTargetPosition().getApproxDistance(stasisPosition) : 0,
+                                              48,
+                                              currentFrame - arbiter->lastCommandFrame,
+                                              BnetConfig::get().spellResendIntervalFrames))
+            {
+                BnetLog::repeatedOrderSkipped();
+                continue;
+            }
 
             arbiter->bwapiUnit->useTech(BWAPI::TechTypes::Stasis_Field, stasisPosition);
             continue;

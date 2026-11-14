@@ -66,6 +66,15 @@ powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 | `early_observer_priority` | `true` | 첫 옵저버의 단계별 생산 요청 |
 | `observer_min_dragoons` | `2` | 투팩·메카닉·벌처 다수 대응 시 옵저버 우선순위를 올릴 완성 드라군 수; 마인 긴급 대응에는 적용하지 않음 |
 | `main_cannons` / `natural_cannons` | `1` / `1` | 본진 / 앞마당 미네랄 라인 조건부 캐논 요청 |
+| `mech_natural_cannons` | `2` | 메카닉·벌처·마인 위협 시 앞마당 캐논 목표 |
+| `expansion_cannons` | `1` | 위협 시 세 번째 이후 모든 확장 미네랄 라인 캐논 수 (0-2) |
+| `cannon_threat_priority` | `true` | 위협 시 기지별 첫 캐논과 파일런을 병력 생산보다 먼저 요청 |
+| `combat_move_guard` / `move_resend_tolerance_px` | `true` / `64` | 비일꾼 유닛의 반복 이동 명령 생략과 같은 목표로 볼 거리 |
+| `combat_move_interval_frames` / `observer_move_interval_frames` | `12` / `24` | 반복 이동 명령 최소 간격(군대 / 옵저버) |
+| `move_guard_min_remaining_px` | `48` | 목표에 이만큼 가까워지면 생략하지 않음(멈칫 방지) |
+| `grid_waypoint_hold` / `grid_waypoint_refresh_px` | `true` / `64` | 경로 웨이포인트를 타일마다 바꾸지 않고 가까워졌을 때만 갱신 |
+| `spell_resend_interval_frames` | `24` | 같은 스테이시스·언로드 명령 재전송 간격 |
+| `unstick_backoff_max_frames` | `192` | 갇힌 일꾼의 Stop·Move 반복 대기 상한 |
 | `bio_attack_start_scale` | `0.7` | MidGameBio 상대 공격 시작 배율 |
 | `bio_attack_continue_scale` | `1.0` | 공격 유지 배율; 기본값은 원작 유지 판단 |
 | `bio_attack_resume_scale` | `0.7` | 재집결 후 공격 재개 배율 |

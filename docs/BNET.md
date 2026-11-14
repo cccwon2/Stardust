@@ -76,7 +76,7 @@ Limitation: follow-up waypoint moves issued later by the pathing code (`MyUnitIm
 | `forced_random_opening` | `"OneGateCore"` | Opening used against a Random enemy instead of UCB1 (PvU picks among `ForgeFastExpand`, `TwoGateZealots`, `OneGateCore`). `OneGateCore` hands off cleanly to PvT `EarlyGameDefense` once Terran is confirmed. Empty string = UCB1. |
 | `early_observer_priority` | `true` | Staged request for the first observer (the producer adds robo + observatory at the same priority). See "First observer policy" below. `false` (or `pluto_pvt_snipe=false`) restores upstream detection. |
 | `observer_min_dragoons` | `2` | Completed dragoons required before a two-factory / mech / 3+ vulture observer request is raised to high priority (0-12). Below it the request stays at normal priority (below dragoon base production) instead of being dropped. Initial value only, not validated in real games. |
-| `natural_cannons` | `1` | Conditional cannon placement requests (0-2) in the natural mineral line once our natural nexus is complete (not in `ForgeExpandGoons`, whose play handles the natural). |
+| `natural_cannons` | `1` | Conditional cannon placement requests (0-2) in the natural mineral line once our natural nexus is complete (not in `ForgeExpandGoons`, whose play handles the natural). Raised to `mech_natural_cannons` under a mech / vulture threat; see "Cannons vs. vultures" below. |
 | `main_cannons` | `1` | Conditional cannon placement request (0-1) in the main mineral line against `TwoFactory` / `MidGameMech` / `MidGameBioMech` / 3+ vultures, independent of the natural, not during `AntiMarineRush`. If the key is absent: `1` when `natural_cannons > 0`, else `0` (old files with `natural_cannons: 0` keep all cannons off). |
 | `bio_attack_start_scale` | `0.7` | Multiplier in `shouldStartAttack` (moving -> attacking) vs. `MidGameBio` (0.1-2.0). |
 | `bio_attack_continue_scale` | `1.0` | Multiplier in `shouldContinueAttack` (attacking -> regrouping). `1.0` keeps upstream continue decisions. |
@@ -167,7 +167,35 @@ All mech keys apply only while `pluto_pvt_snipe` and `pvt_mech_fix` are on and t
 | `mech_attack_continue_scale` | `1.0` | Continue (attacking -> regrouping). `1.0` = upstream. |
 | `mech_attack_resume_scale` | `0.7` | Resume (regrouping -> attacking). |
 | `combat_move_guard` | `true` | For non-worker units (observers, army): a move to within `move_resend_tolerance_px` of the last move target is skipped if the last command was sent less than the command interval ago (auto: latched max latency + 2, i.e. 7 frames at latency 5). Forced moves, stuck units and other command types (attack, stop, ...) are never skipped. Inactive when the interval is 0 (latency <= 4 and `min_command_interval_frames=-1`). |
-| `move_resend_tolerance_px` | `24` | Distance (px) under which a new move target counts as the same target (3-96). Upstream resends above 3px. |
+| `move_resend_tolerance_px` | `64` | Distance (px) under which a new move target counts as the same target (3-192). Upstream resends above 3px. Was 24 until the APM fix below. |
+
+### APM fix (2026-11-15 Fighting Spirit replay)
+
+In a Battle.net PvT replay (opponent human, latency 5) the bot sent 234,356 commands in 19 minutes (12,103 APM by screp; the opponent had 213). 108,208 were Move orders, almost all re-sent to the same unit every 1-8 frames with the target shifting 16-48px, so the 24px `combat_move_guard` passed 99% of them. Causes and fixes (all Battle.net only: inactive while the latency command interval is 0):
+
+| Key | Default | Description |
+|---|---|---|
+| `grid_waypoint_hold` | `true` | Grid navigation moves towards the node 5 tiles ahead and used to re-target on every tile change (one move per tile, ~every 6-8 frames for a dragoon). The current waypoint is now kept while it is still one of the next nodes on the path and the unit is farther than `grid_waypoint_refresh_px` from it, and not near the grid goal. |
+| `grid_waypoint_refresh_px` | `64` | Distance to the waypoint at which the next one is sent (16-160). |
+| `combat_move_interval_frames` | `12` | `combat_move_guard` interval for non-worker units, never below the latency command interval (0-48). |
+| `observer_move_interval_frames` | `24` | Same for observers following the army (5 observers sent 14,586 orders in the replay) (0-96). |
+| `move_guard_min_remaining_px` | `48` | The guard never skips once the unit is closer than this to its last move target, so units do not stop and stutter (0-256). Replay simulation of the interval/tolerance change alone: about half of the Move orders removed. |
+| `spell_resend_interval_frames` | `24` | Identical stasis (raw `useTech` every frame upstream, 148 casts) and shuttle unload / unload-all orders are not re-sent within this interval. `0` = off (0-96). |
+| `unstick_backoff_max_frames` | `192` | Workers only: a probe trapped on the way to a nexus center got a stop + move every ~12 frames for 3 minutes (323 stops, 619 moves). After two unstick attempts without leaving the spot (32px), the wait doubles 24 -> 48 -> 96 -> cap. Army units keep upstream timing. `0` = off (0-480). |
+
+Also: when the move guard skipped a move to a nearby waypoint, `updateMoveWaypoints` treated the unchanged last command as a new order (3px check) and re-planned the path every frame; the check now uses `move_resend_tolerance_px` while the guard is active.
+
+### Cannons vs. vultures (expansions)
+
+In the same replay the third base had no cannon for 13 minutes against 108 vultures and the natural cannon came 4.5 minutes after the nexus (forge at 8:23).
+
+| Key | Default | Description |
+|---|---|---|
+| `mech_natural_cannons` | `2` | Natural cannon target raised to this under a mech / vulture threat (`TwoFactory` / `MidGameMech` / `MidGameBioMech` / 3+ vultures / a spider mine seen) (0-2). |
+| `expansion_cannons` | `1` | Cannons in the mineral line of every other owned base (third and later) under the same threat, once its nexus is complete. Set `2` for more vulture insurance (0-2). |
+| `cannon_threat_priority` | `true` | Under the threat, the first cannon of each base (and its power pylon) is requested at `PRIORITY_BASEDEFENSE` instead of `PRIORITY_NORMAL`, so it is not starved by army production; the forge follows as a prerequisite. Further cannons stay at normal priority. |
+
+Each base writes `[EVENT] cannon_plan base=main|natural|expansion tile=x,y target=.. existing=.. requested=.. urgent=.. mech_threat=..` once per target count.
 
 Not changed: the arbiter condition (3 nexuses, 20+ army), carrier switch (disabled upstream), unit micro.
 
@@ -205,7 +233,7 @@ Not changed: the arbiter condition (3 nexuses, 20+ army), carrier switch (disabl
 
 - Lines are written only on state changes (`[START]`, `[OURS]`, `[ENEMY]`, `[EVENT]`, `[END]`) and every 2 game minutes (`[APM]`, every 2880 frames). Nothing is written per frame or per unit; the counters below are plain in-memory integers.
 - `orders_per_min` (`[APM]` line): our own count of orders issued over the last 2 game minutes, converted to per minute. Counted in `MyUnitImpl::update` from the one-order-per-unit-per-frame flag, so selections are not included and orders sent directly through BWAPI outside `MyUnit` are missed. Use this instead of `bwapi_apm`, which was 0 on Remastered.
-- `orders_total` / `orders_worker` / `orders_observer` / `orders_army`: cumulative issued orders by unit category. `moves_skipped`: non-worker moves skipped by `combat_move_guard`.
+- `orders_total` / `orders_worker` / `orders_observer` / `orders_army`: cumulative issued orders by unit category. `moves_skipped`: non-worker moves skipped by `combat_move_guard`. `grid_holds`: grid re-targets avoided by `grid_waypoint_hold`. `unstick_backoffs`: worker unstick stops sent with a longer backoff. `orders_repeat_skipped`: stasis / unload orders not re-sent.
 - `mech_to_attack` / `mech_to_regroup`: like `bio_*`, while the mech scales are active. `mech_gate_blocks`: times the mech expansion gate switched to blocked; each switch also writes `[EVENT] mech_expand_gate=blocked|open bases=.. army=.. required=..`.
 - `latency_max` / `cmd_interval`: highest latency seen so far and the effective command interval.
 - `bwapi_apm`: `BWAPI::Game::getAPM(false)` (selections excluded), sampled when the `[APM]` line is written. BWAPI computes it with an exponential decay (APMAlert formula, time constant about 0.95 minutes), so it reflects roughly the last minute of play, not a game average and not our own command count. `bwapi_apm_at_end` is the same value at game end; `bwapi_apm_max_sampled` is the maximum over the 2-minute samples (short spikes between samples are not captured). Older logs used `apm`, `avg_apm` and `max_sampled_apm` for these values.

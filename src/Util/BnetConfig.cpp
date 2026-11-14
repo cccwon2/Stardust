@@ -142,6 +142,9 @@ namespace BnetConfig
                 read(json, "observer_min_dragoons", config.observerMinDragoons);
                 read(json, "natural_cannons", config.naturalCannons);
                 mainCannonsPresent = readPresent(json, "main_cannons", config.mainCannons);
+                read(json, "mech_natural_cannons", config.mechNaturalCannons);
+                read(json, "expansion_cannons", config.expansionCannons);
+                read(json, "cannon_threat_priority", config.cannonThreatPriority);
                 BnetPolicy::BioScaleKeys bioKeys;
                 bioKeys.hasLegacy = readPresent(json, "bio_aggression_scale", bioKeys.legacy);
                 bioKeys.hasStart = readPresent(json, "bio_attack_start_scale", bioKeys.start);
@@ -163,6 +166,13 @@ namespace BnetConfig
                 read(json, "mech_attack_resume_scale", config.mechAttackResumeScale);
                 read(json, "combat_move_guard", config.combatMoveGuard);
                 read(json, "move_resend_tolerance_px", config.moveResendTolerancePx);
+                read(json, "combat_move_interval_frames", config.combatMoveIntervalFrames);
+                read(json, "observer_move_interval_frames", config.observerMoveIntervalFrames);
+                read(json, "move_guard_min_remaining_px", config.moveGuardMinRemainingPx);
+                read(json, "grid_waypoint_hold", config.gridWaypointHold);
+                read(json, "grid_waypoint_refresh_px", config.gridWaypointRefreshPx);
+                read(json, "spell_resend_interval_frames", config.spellResendIntervalFrames);
+                read(json, "unstick_backoff_max_frames", config.unstickBackoffMaxFrames);
                 read(json, "print_build_info", config.printBuildInfo);
                 read(json, "bnet_log", config.bnetLog);
 
@@ -197,7 +207,15 @@ namespace BnetConfig
         config.mechAttackStartScale = std::clamp(config.mechAttackStartScale, 0.1, 2.0);
         config.mechAttackContinueScale = std::clamp(config.mechAttackContinueScale, 0.1, 2.0);
         config.mechAttackResumeScale = std::clamp(config.mechAttackResumeScale, 0.1, 2.0);
-        config.moveResendTolerancePx = std::clamp(config.moveResendTolerancePx, 3, 96);
+        config.moveResendTolerancePx = std::clamp(config.moveResendTolerancePx, 3, 192);
+        config.mechNaturalCannons = std::clamp(config.mechNaturalCannons, 0, 2);
+        config.expansionCannons = std::clamp(config.expansionCannons, 0, 2);
+        config.combatMoveIntervalFrames = std::clamp(config.combatMoveIntervalFrames, 0, 48);
+        config.observerMoveIntervalFrames = std::clamp(config.observerMoveIntervalFrames, 0, 96);
+        config.moveGuardMinRemainingPx = std::clamp(config.moveGuardMinRemainingPx, 0, 256);
+        config.gridWaypointRefreshPx = std::clamp(config.gridWaypointRefreshPx, 16, 160);
+        config.spellResendIntervalFrames = std::clamp(config.spellResendIntervalFrames, 0, 96);
+        config.unstickBackoffMaxFrames = std::clamp(config.unstickBackoffMaxFrames, 0, 480);
     }
 
     const Config &get()
@@ -233,6 +251,9 @@ namespace BnetConfig
            << " observer_min_dragoons=" << config.observerMinDragoons
            << " natural_cannons=" << config.naturalCannons
            << " main_cannons=" << config.mainCannons << (mainCannonsPresent ? "" : "(derived)")
+           << " mech_natural_cannons=" << config.mechNaturalCannons
+           << " expansion_cannons=" << config.expansionCannons
+           << " cannon_threat_priority=" << config.cannonThreatPriority
            << " bio_attack_start_scale=" << config.bioAttackStartScale
            << " bio_attack_continue_scale=" << config.bioAttackContinueScale
            << " bio_attack_resume_scale=" << config.bioAttackResumeScale
@@ -250,6 +271,13 @@ namespace BnetConfig
            << " mech_attack_resume_scale=" << config.mechAttackResumeScale
            << " combat_move_guard=" << config.combatMoveGuard
            << " move_resend_tolerance_px=" << config.moveResendTolerancePx
+           << " combat_move_interval_frames=" << config.combatMoveIntervalFrames
+           << " observer_move_interval_frames=" << config.observerMoveIntervalFrames
+           << " move_guard_min_remaining_px=" << config.moveGuardMinRemainingPx
+           << " grid_waypoint_hold=" << config.gridWaypointHold
+           << " grid_waypoint_refresh_px=" << config.gridWaypointRefreshPx
+           << " spell_resend_interval_frames=" << config.spellResendIntervalFrames
+           << " unstick_backoff_max_frames=" << config.unstickBackoffMaxFrames
            << " print_build_info=" << config.printBuildInfo
            << " bnet_log=" << config.bnetLog;
         return os.str();

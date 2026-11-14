@@ -147,6 +147,17 @@ protected:
     // If we have sent a command to the unit to unstick it, when we should next send a normal command again.
     int unstickUntil;
 
+    // Battle.net stuck worker backoff (unstick_backoff_max_frames): consecutive unstick attempts without leaving the
+    // position of the first attempt
+    int unstickAttempts = 0;
+    BWAPI::Position unstickAttemptPosition = BWAPI::Positions::Invalid;
+
+    // Frames to wait after sending an unstick stop: remaining latency frames, backed off for repeatedly stuck workers
+    int nextUnstickWait();
+
+    // Battle.net grid waypoint hold (grid_waypoint_hold): whether to keep the current grid waypoint instead of re-targeting
+    bool holdGridWaypoint() const;
+
     void initiateMove();
 
     virtual void resetMoveData();

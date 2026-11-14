@@ -80,6 +80,9 @@ namespace BnetLog
         int ordersArmy = 0;
         int ordersWindow = 0;
         int movesSkipped = 0;
+        int gridHolds = 0;
+        int unstickBackoffs = 0;
+        int repeatedOrdersSkipped = 0;
         int mechGateState = -1;     // -1 unknown, 0 open, 1 blocked
         int mechGateBlocks = 0;     // Number of open -> blocked transitions
     }
@@ -105,6 +108,21 @@ namespace BnetLog
     void moveSkipped()
     {
         movesSkipped++;
+    }
+
+    void gridHold()
+    {
+        gridHolds++;
+    }
+
+    void unstickBackoff()
+    {
+        unstickBackoffs++;
+    }
+
+    void repeatedOrderSkipped()
+    {
+        repeatedOrdersSkipped++;
     }
 
     ResourceOrderStats &resourceOrders()
@@ -133,6 +151,9 @@ namespace BnetLog
             ordersArmy = 0;
             ordersWindow = 0;
             movesSkipped = 0;
+            gridHolds = 0;
+            unstickBackoffs = 0;
+            repeatedOrdersSkipped = 0;
             mechGateState = -1;
             mechGateBlocks = 0;
         }
@@ -162,6 +183,9 @@ namespace BnetLog
                << " orders_observer=" << ordersObserver
                << " orders_army=" << ordersArmy
                << " moves_skipped=" << movesSkipped
+               << " grid_holds=" << gridHolds
+               << " unstick_backoffs=" << unstickBackoffs
+               << " orders_repeat_skipped=" << repeatedOrdersSkipped
                << " mech_gate_blocks=" << mechGateBlocks
                << " latency_max=" << BnetConfig::maxLatencyFrames()
                << " cmd_interval=" << BnetConfig::commandIntervalFrames();
