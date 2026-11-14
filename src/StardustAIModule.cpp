@@ -1,4 +1,5 @@
 #include "StardustAIModule.h"
+#include "BnetConfig.h"
 
 #include "Timer.h"
 #include "Map.h"
@@ -73,6 +74,7 @@ void StardustAIModule::onStart()
 
     // Initialize globals that just need to make sure their global data is reset
     Log::initialize();
+    BnetConfig::initialize();
     Builder::initialize();
     Opponent::initialize();
     General::initialize();
@@ -125,6 +127,7 @@ void StardustAIModule::onStart()
 
     Log::Get() << "Initialized game against " << Opponent::getName()
                << " on " << BWAPI::Broodwar->mapFileName() << " (" << BWAPI::Broodwar->mapHash() << ")";
+    Log::Get() << "Battle.net config: " << BnetConfig::summary();
     Log::Get() << "My starting position: " << Map::getMyMain()->getTilePosition();
     if (Map::getMyNatural())
     {
@@ -295,7 +298,9 @@ void StardustAIModule::onFrame()
     Timer::checkpoint("PathFinding::updateGrids");
 
     // Surrender logic
-    if (enableSurrender)
+    // Surrender is controlled at runtime by enable_auto_gg in stardust_bnet.json (default off);
+    // enableSurrender remains as a programmatic override for tests
+    if (enableSurrender || BnetConfig::get().enableAutoGG)
     {
         // Surrender if the following is true:
         // - We have no workers left and no money / depot to create a new one

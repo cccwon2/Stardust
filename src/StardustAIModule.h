@@ -14,12 +14,10 @@ public:
     // Used for getting stable pointers in the case of crashes
     unsigned long moduleBaseAddress = 0;
 
-    // Whether to surrender when losing is inevitable
-#if VS_HUMAN
-    bool enableSurrender = true;
-#else
+    // Programmatic override to force surrender logic on (used by tests).
+    // In normal play, surrender ("gg" + leave) is controlled at runtime by enable_auto_gg in stardust_bnet.json (default false),
+    // including VS_HUMAN builds, which previously enabled it unconditionally.
     bool enableSurrender = false;
-#endif
 
     bool enableFrameLimit = true;
 

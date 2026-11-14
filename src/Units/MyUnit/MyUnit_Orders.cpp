@@ -2,6 +2,52 @@
 #include "MyWorker.h"
 
 #include "DebugFlag_UnitOrders.h"
+#include "BnetConfig.h"
+
+namespace
+{
+    // Battle.net APM guard: per-frame counter for worker resource orders (gather / return cargo / resource right-click)
+    int resourceOrderFrame = -1;
+    int resourceOrdersThisFrame = 0;
+
+    // Returns true if a worker resource order may be issued on this frame (max_orders_per_frame cap)
+    bool resourceOrderBudgetAvailable()
+    {
+        int cap = BnetConfig::get().maxOrdersPerFrame;
+        if (cap <= 0) return true;
+        if (resourceOrderFrame != currentFrame)
+        {
+            resourceOrderFrame = currentFrame;
+            resourceOrdersThisFrame = 0;
+        }
+        return resourceOrdersThisFrame < cap;
+    }
+
+    void countResourceOrder()
+    {
+        if (resourceOrderFrame != currentFrame)
+        {
+            resourceOrderFrame = currentFrame;
+            resourceOrdersThisFrame = 0;
+        }
+        resourceOrdersThisFrame++;
+    }
+
+    // Returns true if an identical command to the same unit was issued too recently in a high-latency environment
+    // (min_command_interval_frames, defaulting to latencyFrames + 2 when latency > 4)
+    bool withinCommandInterval(int lastCommandFrame)
+    {
+        int interval = BnetConfig::commandIntervalFrames();
+        if (interval <= 0) return false;
+        return (currentFrame - lastCommandFrame) < interval;
+    }
+
+    // Resource command guards only apply in safe mining mode, since the mining optimizer depends on frame-exact resends
+    bool resourceGuardsActive()
+    {
+        return BnetConfig::get().safeBnetMining;
+    }
+}
 
 void MyUnitImpl::move(BWAPI::Position position, bool force)
 {
@@ -17,6 +63,9 @@ void MyUnitImpl::move(BWAPI::Position position, bool force)
         if (bwapiUnit->isStuck()) return false;
         if (bwapiUnit->getLastCommand().getType() != BWAPI::UnitCommandTypes::Move) return false;
         if (bwapiUnit->getLastCommand().getTargetPosition().getApproxDistance(position) > 3) return false;
+
+        // Battle.net guard: in high-latency environments, never resend the same move within the minimum command interval
+        if (withinCommandInterval(lastCommandFrame)) return true;
 
         // Don't resend orders to similar positions too quickly
         if (lastCommandFrame > (currentFrame - BWAPI::Broodwar->getLatencyFrames() - 3)) return false;
@@ -114,7 +163,21 @@ void MyUnitImpl::rightClick(BWAPI::Unit target)
         }
     }
 
+    bool isResourceClick = target->getType().isMineralField() || target->getType().isResourceDepot();
+    if (isResourceClick && resourceGuardsActive())
+    {
+        BWAPI::UnitCommand currentCommand(bwapiUnit->getLastCommand());
+        if (currentCommand.getType() == BWAPI::UnitCommandTypes::Right_Click_Unit &&
+            currentCommand.getTarget() == target &&
+            withinCommandInterval(lastCommandFrame))
+        {
+            return;
+        }
+        if (!resourceOrderBudgetAvailable()) return;
+    }
+
     auto result = bwapiUnit->rightClick(target);
+    if (result && isResourceClick) countResourceOrder();
 
     if (result)
     {
@@ -159,11 +222,33 @@ bool MyWorkerImpl::gather(BWAPI::Unit target)
         }
     }
 
+    if (resourceGuardsActive())
+    {
+        // Battle.net guard: don't resend a gather to the same target within the minimum command interval,
+        // and never re-gather a target the worker is already moving to / waiting at / mining
+        BWAPI::UnitCommand currentCommand(bwapiUnit->getLastCommand());
+        if (currentCommand.getType() == BWAPI::UnitCommandTypes::Gather && currentCommand.getTarget() == target)
+        {
+            if (withinCommandInterval(lastCommandFrame)) return false;
+
+            auto order = bwapiUnit->getOrder();
+            if (bwapiUnit->getOrderTarget() == target &&
+                (order == BWAPI::Orders::MoveToMinerals || order == BWAPI::Orders::WaitForMinerals ||
+                 order == BWAPI::Orders::MiningMinerals || order == BWAPI::Orders::MoveToGas ||
+                 order == BWAPI::Orders::WaitForGas || order == BWAPI::Orders::HarvestGas))
+            {
+                return false;
+            }
+        }
+        if (!resourceOrderBudgetAvailable()) return false;
+    }
+
     auto result = bwapiUnit->gather(target);
     if (result)
     {
         issuedOrderThisFrame = true;
         gatherCommandFrames.insert(currentFrame);
+        countResourceOrder();
     }
 
 #if DEBUG_UNIT_ORDERS
@@ -181,11 +266,25 @@ bool MyWorkerImpl::returnCargo()
         return false;
     }
 
+    if (resourceGuardsActive())
+    {
+        // Battle.net guard: don't spam return cargo while the worker is already returning or the last return is still in flight
+        auto order = bwapiUnit->getOrder();
+        if (order == BWAPI::Orders::ReturnMinerals || order == BWAPI::Orders::ReturnGas) return false;
+        if (bwapiUnit->getLastCommand().getType() == BWAPI::UnitCommandTypes::Return_Cargo &&
+            withinCommandInterval(lastCommandFrame))
+        {
+            return false;
+        }
+        if (!resourceOrderBudgetAvailable()) return false;
+    }
+
     auto result = bwapiUnit->returnCargo();
     if (result)
     {
         issuedOrderThisFrame = true;
         returnCommandFrames.insert(currentFrame);
+        countResourceOrder();
     }
 
 #if DEBUG_UNIT_ORDERS
