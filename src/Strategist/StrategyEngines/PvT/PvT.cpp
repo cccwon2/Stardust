@@ -10,6 +10,7 @@
 #include "Strategist.h"
 #include "BnetConfig.h"
 #include "BnetPolicy.h"
+#include "BnetLog.h"
 
 #include <sstream>
 
@@ -738,6 +739,13 @@ void PvT::handleDetection(std::vector<std::shared_ptr<Play>> &plays, std::map<in
     // The main army play will reactively request mobile detection when it sees a cloaked enemy unit
     // The logic here is to look ahead to make sure we already have detection available when we need it
 
+    // Battle.net summary log: first observer completion frame (any matchup state)
+    if (!plutoFirstObserverLogged && Units::countCompleted(BWAPI::UnitTypes::Protoss_Observer) > 0)
+    {
+        plutoFirstObserverLogged = true;
+        BnetLog::event("first_observer_complete");
+    }
+
     // Break out if we are already building an observer
     if (Units::countIncomplete(BWAPI::UnitTypes::Protoss_Observer) > 0) return;
 
@@ -795,8 +803,19 @@ void PvT::handleDetection(std::vector<std::shared_ptr<Play>> &plays, std::map<in
         auto stage = BnetPolicy::decideDetection(input);
         if (stage != plutoDetectionStage)
         {
-            Log::Get() << "Pluto detection stage: " << BnetPolicy::detectionStageName(plutoDetectionStage)
-                       << " -> " << BnetPolicy::detectionStageName(stage);
+            std::ostringstream reason;
+            reason << "detection_stage from=" << BnetPolicy::detectionStageName(plutoDetectionStage)
+                   << " to=" << BnetPolicy::detectionStageName(stage)
+                   << " mine=" << input.mineSeenOrResearched
+                   << " twofact_or_mech=" << input.twoFactoryOrMech
+                   << " vultures=" << input.enemyVultures
+                   << " vulture_or_shop=" << input.vultureOrMachineShopSeen
+                   << " anti_marine_rush=" << input.antiMarineRush
+                   << " timing=" << input.timingReached
+                   << " dragoons=" << input.completedDragoons
+                   << " observers=" << input.completedObservers;
+            Log::Get() << "Pluto " << reason.str();
+            BnetLog::event(reason.str());
             plutoDetectionStage = stage;
         }
 
@@ -851,6 +870,7 @@ void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &
         if (plutoCannonIssuesLogged.insert(key.str()).second)
         {
             Log::Get() << "Pluto cannons @ " << base->getTilePosition() << ": " << reason;
+            BnetLog::event(std::string("cannon_issue base=") + (base == Map::getMyMain() ? "main" : "natural") + " reason=\"" + reason + "\"");
         }
     };
 

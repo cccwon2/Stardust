@@ -84,6 +84,9 @@ private:
     // Pluto snipe: cannon placement issues already logged (base tile + reason), to avoid repeating them every frame
     std::set<std::string> plutoCannonIssuesLogged;
 
+    // Battle.net summary log: whether first_observer_complete was written
+    bool plutoFirstObserverLogged = false;
+
     TerranStrategy recognizeEnemyStrategy();
 
     OurStrategy chooseOurStrategy(TerranStrategy newEnemyStrategy, std::vector<std::shared_ptr<Play>> &plays);

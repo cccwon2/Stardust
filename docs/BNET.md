@@ -13,6 +13,9 @@ The bot reads the first file found among:
 If no file is found, or a key is missing or has the wrong type, the default below is used.
 Comments (`//`, `/* */`) are allowed. The template is `config/stardust_bnet.json`.
 
+The file is read once at game start (`onStart`). Edits made during a game take effect from the next game; there is no hot reload.
+The effective values (after clamping and derived defaults) are written to the `[START]` log line.
+
 ## Phase 1: Battle.net stability
 
 | Key | Default | Effect |
@@ -150,11 +153,25 @@ Mid-game vs bio: keep at least `max(4, dragoons)` zealots with leg enhancements 
 - Log file `bwapi-data/write/stardust_bnet.log`, appended, one line per event, flushed immediately:
 
 ```
-2026-11-15 21:03:11 f=0 t=0:00 [START] map="..." opponent="..." enemy_race=Terran latency_frames=6 battlenet=1 multiplayer=1 config=bwapi-data/AI/stardust_bnet.json safe_bnet_mining=1 ...
+2026-11-15 21:03:11 f=0 t=0:00 [START] map="..." opponent="..." enemy_race=Terran latency_frames=6 battlenet=1 multiplayer=1 config=bwapi-data/AI/stardust_bnet.json safe_bnet_mining=1 ... observer_min_dragoons=2 natural_cannons=1 main_cannons=1 bio_attack_start_scale=0.7 bio_attack_continue_scale=1 bio_attack_resume_scale=0.7 bio_aggression_scale(legacy)=absent bnet_log=1
 2026-11-15 21:03:11 f=0 t=0:00 [OURS] from=- to=EarlyGameDefense
+2026-11-15 21:04:40 f=2100 t=1:28 [EVENT] detection_stage from=Upstream to=Preventive mine=0 twofact_or_mech=0 vultures=0 vulture_or_shop=0 anti_marine_rush=0 timing=1 dragoons=2 observers=0
 2026-11-15 21:06:02 f=4100 t=2:52 [ENEMY] from=Unknown to=TwoFactory
-2026-11-15 21:07:14 f=5760 t=4:01 [APM] apm=142 latency_frames=6 supply=31 stuck_reassign=0
-2026-11-15 21:20:40 f=24500 t=17:09 [END] result=WIN avg_apm=160 max_sampled_apm=171 final_enemy_strategy=MidGameMech final_our_strategy=MidGame stuck_reassign=1
+2026-11-15 21:06:02 f=4101 t=2:52 [EVENT] detection_stage from=Preventive to=Urgent mine=0 twofact_or_mech=1 ...
+2026-11-15 21:06:40 f=4700 t=3:16 [EVENT] cannon_issue base=natural reason="..."
+2026-11-15 21:07:05 f=5300 t=3:41 [EVENT] first_observer_complete
+2026-11-15 21:07:14 f=5760 t=4:01 [APM] bwapi_apm=142 latency_frames=6 supply=31 res_attempts=2210 res_issued=905 res_blocked_interval=310 res_blocked_already=990 res_blocked_budget=5 stuck_attempts=1 stuck_reassign=0 stuck_cmd_ok=1 stuck_cmd_failed=0 stuck_budget_deferred=0 bio_to_attack=0 bio_to_regroup=0
+2026-11-15 21:20:40 f=24500 t=17:09 [END] result=WIN bwapi_apm_at_end=160 bwapi_apm_max_sampled=171 final_enemy_strategy=MidGameMech final_our_strategy=MidGame res_attempts=... bio_to_attack=3 bio_to_regroup=2
 ```
 
-`[APM]` is written every 2 game minutes using `BWAPI::Game::getAPM(false)`; `[EVENT]` records `opponent_left` and `surrender`.
+(Numbers above are illustrative only, not measured results.)
+
+### Log line meanings
+
+- Lines are written only on state changes (`[START]`, `[OURS]`, `[ENEMY]`, `[EVENT]`, `[END]`) and every 2 game minutes (`[APM]`, every 2880 frames). Nothing is written per frame or per unit; the counters below are plain in-memory integers.
+- `bwapi_apm`: `BWAPI::Game::getAPM(false)` (selections excluded), sampled when the `[APM]` line is written. BWAPI computes it with an exponential decay (APMAlert formula, time constant about 0.95 minutes), so it reflects roughly the last minute of play, not a game average and not our own command count. `bwapi_apm_at_end` is the same value at game end; `bwapi_apm_max_sampled` is the maximum over the 2-minute samples (short spikes between samples are not captured). Older logs used `apm`, `avg_apm` and `max_sampled_apm` for these values.
+- `res_*`: cumulative counts (since game start) of resource commands (gather / return cargo / resource right-click) for workers in simple gather mode only, i.e. where the Battle.net guards apply. `res_attempts` = calls reaching the guard; `res_issued` = commands BWAPI accepted; `res_blocked_interval` = same command to the same target within `min_command_interval_frames`; `res_blocked_already` = already moving to / waiting at / mining the target, or already returning cargo; `res_blocked_budget` = `max_orders_per_frame` exhausted. Attempts that BWAPI itself rejects are counted in `res_attempts` only. Optimized-mining workers and recovery commands are not counted here.
+- `stuck_*`: cumulative stuck-worker recovery counts: `stuck_attempts` (recoveries started), `stuck_reassign` (successful reassignment to a different patch), `stuck_cmd_ok` / `stuck_cmd_failed` (recovery gather accepted / rejected by BWAPI), `stuck_budget_deferred` (postponed because the per-frame budget was exhausted).
+- `bio_to_attack` / `bio_to_regroup`: cumulative attack <-> regroup transitions of attack-base squads, counted only while the MidGameBio scales are active (Terran opponent recognized as `MidGameBio` with `pluto_pvt_snipe` on). Repeated decisions in the same state are not counted.
+- `[EVENT] detection_stage`: the first-observer request stage changed; the line lists the inputs that drove the decision. `first_observer_complete` is written once, on the first frame a completed observer exists (PvT only). `cannon_issue` is written once per distinct cannon placement problem. `opponent_left` and `surrender` are unchanged.
+- The log compiles with `TOURNAMENT_BUILD=ON` (CMake `BNET_LOG`, default `ON`) and can be turned off at runtime with `bnet_log`. The counters are kept even when the log is disabled, but are not written anywhere.

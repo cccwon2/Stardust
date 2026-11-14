@@ -6,6 +6,7 @@
 #include "Strategist.h"
 #include "StrategyEngine.h"
 #include "BnetConfig.h"
+#include "BnetLog.h"
 
 #include "DebugFlag_CombatSim.h"
 
@@ -20,18 +21,23 @@ namespace
     // Applied after the reinforcement factor and before the natural-defense bonus in each decision function.
     enum class BioDecision { Start, Continue, Resume };
 
-    double bnetAggressionScale(BioDecision decision)
+    // Whether the MidGameBio per-state scales apply right now
+    bool bnetBioScalesActive()
     {
-        auto &bnetConfig = BnetConfig::get();
-        if (!bnetConfig.plutoPvtSnipe) return 1.0;
+        if (!BnetConfig::get().plutoPvtSnipe) return false;
 
         auto enemy = BWAPI::Broodwar->enemy();
-        if (!enemy || enemy->getRace() != BWAPI::Races::Terran) return 1.0;
+        if (!enemy || enemy->getRace() != BWAPI::Races::Terran) return false;
 
         auto engine = Strategist::getStrategyEngine();
-        if (!engine) return 1.0;
-        if (engine->getEnemyStrategy() != "MidGameBio") return 1.0;
+        return engine && engine->getEnemyStrategy() == "MidGameBio";
+    }
 
+    double bnetAggressionScale(BioDecision decision)
+    {
+        if (!bnetBioScalesActive()) return 1.0;
+
+        auto &bnetConfig = BnetConfig::get();
         switch (decision)
         {
             case BioDecision::Start: return bnetConfig.bioAttackStartScale;
@@ -453,6 +459,7 @@ void AttackBaseSquad::execute(UnitCluster &cluster)
     // Make the final decision based on what state we are currently in
 
     bool attack;
+    bool wasAttacking = cluster.currentActivity == UnitCluster::Activity::Attacking;
     switch (cluster.currentActivity)
     {
         case UnitCluster::Activity::Moving:
@@ -469,6 +476,9 @@ void AttackBaseSquad::execute(UnitCluster &cluster)
             attack = false;
             break;
     }
+
+    // Battle.net summary counters: attack <-> regroup transitions while the MidGameBio scales are active
+    if (bnetBioScalesActive()) BnetLog::bioDecision(wasAttacking, attack || ignoreCombatSim);
 
     if (attack || ignoreCombatSim)
     {
