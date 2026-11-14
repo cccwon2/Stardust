@@ -384,6 +384,44 @@ namespace
         CHECK(!cannonRequestUrgent(true, false, 0, 0));
         CHECK(!cannonRequestUrgent(false, true, 0, 0));
     }
+
+    void testPvzAllIn()
+    {
+        // 2026-11-15 Radeon replay: 12 pool, speedlings at the natural around frame 5700
+        CHECK(pvzAllInByLings(true, true, 5700, 6, 6, 6, 12));
+        CHECK(!pvzAllInByLings(true, true, 5700, 5, 6, 6, 12));
+        CHECK(pvzAllInByLings(true, true, 5000, 0, 12, 6, 12));
+        CHECK(!pvzAllInByLings(true, true, 8000, 0, 12, 6, 12));    // seen-lings rule ends at frame 8000
+        CHECK(pvzAllInByLings(true, true, 8999, 6, 0, 6, 12));
+        CHECK(!pvzAllInByLings(true, true, 9000, 6, 0, 6, 12));     // base-lings rule ends at frame 9000
+        CHECK(!pvzAllInByLings(true, false, 5700, 10, 20, 6, 12));  // opening not known yet
+        CHECK(!pvzAllInByLings(false, true, 5700, 10, 20, 6, 12));
+        CHECK(!pvzAllInByLings(true, true, 5700, 10, 20, 0, 0));    // both rules off
+
+        CHECK(!pvzAllInLatchActive(-1, 6000));
+        CHECK(pvzAllInLatchActive(5700, 6000));
+        CHECK(pvzAllInLatchActive(5700, 9999));
+        CHECK(!pvzAllInLatchActive(5700, 10000));
+        CHECK(!pvzAllInLatchActive(5700, 100));                     // new game started (frame went back)
+
+        CHECK(pvzWallCannonTarget(true, true, 3) == 3);
+        CHECK(pvzWallCannonTarget(true, false, 3) == 2);
+        CHECK(pvzWallCannonTarget(false, true, 5) == 2);
+        CHECK(pvzWallCannonTarget(true, true, 2) == 2);
+
+        CHECK(pvzMinZealots(true, true, false, 2, 4, 30) == 2);
+        CHECK(pvzMinZealots(true, false, false, 2, 4, 30) == 0);
+        CHECK(pvzMinZealots(true, true, true, 2, 4, 3) == 4);
+        CHECK(pvzMinZealots(true, true, true, 2, 4, 16) == 6);
+        CHECK(pvzMinZealots(true, true, true, 2, 4, 60) == 8);      // capped
+        CHECK(pvzMinZealots(true, true, true, 6, 0, 0) == 6);
+        CHECK(pvzMinZealots(false, true, true, 2, 4, 30) == 0);
+
+        CHECK(pvzProbeCap(true, true, 18) == 18);
+        CHECK(pvzProbeCap(true, false, 18) == 0);
+        CHECK(pvzProbeCap(true, true, 0) == 0);
+        CHECK(pvzProbeCap(false, true, 18) == 0);
+    }
 }
 
 int main()
@@ -399,6 +437,7 @@ int main()
     testRepeatedOrder();
     testUnstickBackoff();
     testCannonTargets();
+    testPvzAllIn();
 
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

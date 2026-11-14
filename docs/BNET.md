@@ -199,6 +199,31 @@ Each base writes `[EVENT] cannon_plan base=main|natural|expansion tile=x,y targe
 
 Not changed: the arbiter condition (3 nexuses, 20+ army), carrier switch (disabled upstream), unit micro.
 
+## PvZ vs. zergling all-ins (2026-11-15 Radeon replay)
+
+Loss in 6:15 to a human 12 pool -> hatchery -> speedling all-in (pool 1:17, speed 3:38, about 24 zergling morphs). The
+opening came from UCB1 (`FFEDragoons`, nothing fixed it for Zerg). `PoolBeforeHatchery` was recognized at 2:01, but
+`ZerglingAllIn` only at frame 6782 (4:42), after the lings had broken the natural: the upstream rules count zerglings by
+estimated creation frame (9 before frame 4000, 13 before 5000, 20 before 7000). `FFEDragoons` has no transition for
+`ZerglingAllIn`, and its zealot target `1 + lings/3 - completed cannons` stayed at one zealot behind two wall cannons,
+below probe production. Army at the end: 2 zealots, 1 dragoon; 27 of 30 trained units were probes.
+
+| Key | Default | Description |
+|---|---|---|
+| `forced_pvz_opening` | `FFEDragoons` | PvZ opening instead of the per-opponent UCB1 search: `FFEDragoons`, `SairSpeedlot` or `EarlyGameDefense` (1 gate, safest vs. early pools, slower economy). Empty = UCB1. Independent of `pvz_antiallin_fix`. Without a forge-gateway wall on the map the FFE openings fall back to the upstream main-defense play. |
+| `pvz_antiallin_fix` | `true` | Master switch for the keys below. |
+| `pvz_allin_base_lings` | `6` | Once the opening is known (pool or hatchery first), this many zerglings at our main / natural before frame 9000 confirm `ZerglingAllIn`. `0` = off (0-30). |
+| `pvz_allin_seen_lings` | `12` | Same with this many living zerglings known anywhere before frame 8000. `0` = off (0-40). |
+| `pvz_pool_first_cannons` | `3` | FFE wall cannons once `PoolBeforeHatchery` or `ZerglingAllIn` is recognized (upstream 2). The third cannon is timed for frame 4500, further ones +1000 frames each. The upstream all-in schedule (up to 5 by frame 6000) still applies on top (2-5). |
+| `pvz_pool_first_zealots` | `2` | `FFEDragoons`: minimum zealots vs. pool first, at base-defense priority (0-6). |
+| `pvz_allin_zealots` | `4` | `FFEDragoons` during `ZerglingAllIn`: minimum zealots, or one per three known zerglings (at most 8), requested above probe production (`PRIORITY_EMERGENCY + 1`) (0-12). |
+| `pvz_allin_probe_cap` | `18` | FFE play during `ZerglingAllIn`: probe goals above this count move to main-army priority, below the zealots. `0` = off; otherwise 12-40. |
+
+- The extra all-in confirmation latches until frame 10000 (or until lair tech, which upstream already turns into `Lair`), so the measures do not flicker when the lings step out of vision. It adds to the upstream rules and never removes them.
+- `FFEDragoons` still does not switch to `AntiAllIn` (that strategy defends the main and would abandon the natural nexus and wall); the measures stay inside the FFE.
+- Log: `[EVENT] pvz_allin_detect lings_at_bases=.. lings_alive=.. from=..` when the extra rule fires, and `[EVENT] pvz_defense enemy=.. wall_cannons=.. min_zealots=.. probe_cap=..` whenever the FFEDragoons defense targets change. An unknown `forced_pvz_opening` writes `[EVENT] forced_pvz_opening_unknown`.
+- Not changed: zergling recognition before the opening is known, `ZerglingRush` handling (the FFE play already cancels the natural and defends the main), other PvZ strategies, unit micro.
+
 ## Phase 3: Build script and summary log
 
 ### Build id at game start

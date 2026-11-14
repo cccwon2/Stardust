@@ -58,6 +58,17 @@ namespace BnetConfig
         int spellResendIntervalFrames = 24;     // Minimum frames between identical stasis / unload orders. 0 = off
         int unstickBackoffMaxFrames = 192;      // Backoff cap for repeatedly stuck workers (stop / move loop). 0 = off
 
+        // PvZ vs. zergling all-ins (pool first -> mass speedlings)
+        std::string forcedPvzOpening = "FFEDragoons";   // PvZ opening used instead of UCB1: FFEDragoons, SairSpeedlot,
+                                                        // EarlyGameDefense (empty = use UCB1)
+        bool pvzAntiAllinFix = true;            // Master switch for the PvZ changes below
+        int pvzAllinBaseLings = 6;              // Zerglings at our main / natural that confirm an all-in (before frame 9000). 0 = off
+        int pvzAllinSeenLings = 12;             // Living zerglings seen that confirm an all-in (before frame 8000). 0 = off
+        int pvzPoolFirstCannons = 3;            // FFE wall cannons once a pool-first opening is recognized (2-5)
+        int pvzPoolFirstZealots = 2;            // FFEDragoons: zealots before dragoons vs. pool first (0-6)
+        int pvzAllinZealots = 4;                // FFEDragoons: minimum zealots vs. an all-in, above probe production (0-12)
+        int pvzAllinProbeCap = 18;              // FFE: probes above this move below zealots during an all-in. 0 = off
+
         // Phase 3: Lightweight log
         bool printBuildInfo = true;             // Local-only in-game message at game start: build id and config source
         bool bnetLog = true;                    // Write one-line summaries to bwapi-data/write/stardust_bnet.log

@@ -11,6 +11,8 @@
 #include <Strategist/Plays/MainArmy/DefendMyMain.h>
 #include <Strategist/Plays/Defensive/DefendBase.h>
 #include "Strategies.h"
+#include "BnetConfig.h"
+#include "BnetPolicy.h"
 
 #if INSTRUMENTATION_ENABLED
 #define CVIS_LOG_STATE_CHANGES true
@@ -546,6 +548,32 @@ namespace
         if (currentCannons < 6) buildWallCannons(prioritizedProductionGoals, cannonPlacementsAvailable, 1, 9000);
     }
 
+    // Battle.net (pvz_antiallin_fix): vs. a pool-first Zerg, raise the wall cannons to pvz_pool_first_cannons
+    // (third cannon timed for frame 4500, a 12-pool speedling arrival is around frame 5700). During an all-in, probes
+    // above pvz_allin_probe_cap move below the zealots requested by the strategy engine.
+    void handleBnetPoolFirst(std::map<int, std::vector<ProductionGoal>> &prioritizedProductionGoals, bool capProbes)
+    {
+        auto &bnetConfig = BnetConfig::get();
+        if (!bnetConfig.pvzAntiAllinFix) return;
+        if (BWAPI::Broodwar->enemy()->getRace() != BWAPI::Races::Zerg) return;
+
+        bool allIn = Strategist::isEnemyStrategy(PvZ::ZergStrategy::ZerglingAllIn);
+        bool poolFirst = allIn || Strategist::isEnemyStrategy(PvZ::ZergStrategy::PoolBeforeHatchery);
+        if (!poolFirst) return;
+
+        int target = BnetPolicy::pvzWallCannonTarget(true, poolFirst, bnetConfig.pvzPoolFirstCannons);
+        std::vector<BWAPI::TilePosition> cannonPlacementsAvailable;
+        int currentCannons = currentWallCannons(prioritizedProductionGoals, cannonPlacementsAvailable);
+        for (int i = currentCannons; i < target; i++)
+        {
+            buildWallCannons(prioritizedProductionGoals, cannonPlacementsAvailable, 1, i < 2 ? 0 : 4500 + (i - 2) * 1000);
+        }
+
+        if (!capProbes) return;
+        int probeCap = BnetPolicy::pvzProbeCap(true, allIn, bnetConfig.pvzAllinProbeCap);
+        if (probeCap > 0) moveWorkerProductionToLowerPriority(prioritizedProductionGoals, probeCap, PRIORITY_MAINARMY);
+    }
+
     void handleNonZergRush(std::map<int, std::vector<ProductionGoal>> &prioritizedProductionGoals)
     {
         int baseFrame = 4000 - UnitUtil::BuildTime(BWAPI::UnitTypes::Protoss_Photon_Cannon);
@@ -662,6 +690,7 @@ void ForgeFastExpand::addPrioritizedProductionGoals(std::map<int, std::vector<Pr
             addBuildingToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Gateway, wall.gateway);
             addUnitToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Zealot);
             moveWorkerProductionToLowerPriority(prioritizedProductionGoals, 14);
+            handleBnetPoolFirst(prioritizedProductionGoals, false);
             break;
         }
         case State::STATE_GATEWAY_PENDING:
@@ -670,6 +699,7 @@ void ForgeFastExpand::addPrioritizedProductionGoals(std::map<int, std::vector<Pr
             addBuildingToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Gateway, wall.gateway);
             addUnitToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Zealot);
             moveWorkerProductionToLowerPriority(prioritizedProductionGoals, 14);
+            handleBnetPoolFirst(prioritizedProductionGoals, false);
             break;
         }
         case State::STATE_FINISHED:
@@ -686,6 +716,7 @@ void ForgeFastExpand::addPrioritizedProductionGoals(std::map<int, std::vector<Pr
             handleZerglingAllIn(prioritizedProductionGoals);
             handleHydraBust(prioritizedProductionGoals);
             handleNonZergRush(prioritizedProductionGoals);
+            handleBnetPoolFirst(prioritizedProductionGoals, true);
 
             break;
         }

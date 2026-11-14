@@ -412,4 +412,58 @@ namespace BnetPolicy
     {
         return threatPriority && mechThreat && existingOrPending + requestIndex == 0;
     }
+    // ---------------------------------------------------------------------------------------------
+    // PvZ vs. zergling all-ins
+    // ---------------------------------------------------------------------------------------------
+
+    // Frames after which the extra all-in rules no longer trigger and an existing latch expires
+    constexpr int PvzAllInBaseLingsUntilFrame = 9000;
+    constexpr int PvzAllInSeenLingsUntilFrame = 8000;
+    constexpr int PvzAllInLatchUntilFrame = 10000;
+
+    // Extra all-in confirmation on top of the upstream timing rules, which only count zerglings by their estimated creation
+    // frame and so confirmed the 12-pool speedling all-in of 2026-11-15 only after it had broken the natural (frame 6782).
+    // Only once the opening is known (pool or hatchery first): zerglings at our main / natural, or many living zerglings.
+    inline bool pvzAllInByLings(bool enabled, bool openingKnown, int frame, int lingsAtOurBases, int lingsAlive,
+                                int baseThreshold, int seenThreshold)
+    {
+        if (!enabled || !openingKnown) return false;
+        if (baseThreshold > 0 && frame < PvzAllInBaseLingsUntilFrame && lingsAtOurBases >= baseThreshold) return true;
+        if (seenThreshold > 0 && frame < PvzAllInSeenLingsUntilFrame && lingsAlive >= seenThreshold) return true;
+        return false;
+    }
+
+    // Whether a latched all-in confirmation still holds (latchFrame < 0 = not latched)
+    inline bool pvzAllInLatchActive(int latchFrame, int frame)
+    {
+        return latchFrame >= 0 && frame >= latchFrame && frame < PvzAllInLatchUntilFrame;
+    }
+
+    // FFE wall cannon target: upstream 2, raised to pool_first_cannons vs. pool first or an all-in
+    // (the all-in schedule itself is upstream: up to 5 by frame 6000)
+    inline int pvzWallCannonTarget(bool enabled, bool poolFirstOrAllIn, int poolFirstCannons)
+    {
+        if (!enabled || !poolFirstOrAllIn) return 2;
+        return poolFirstCannons > 2 ? poolFirstCannons : 2;
+    }
+
+    // FFEDragoons minimum zealots: pool first -> pool_first_zealots; all-in -> allin_zealots or one per three known lings (at most 8)
+    inline int pvzMinZealots(bool enabled, bool poolFirst, bool allIn, int poolFirstZealots, int allInZealots, int enemyLings)
+    {
+        if (!enabled) return 0;
+        if (allIn)
+        {
+            int byLings = (enemyLings + 2) / 3;
+            if (byLings > 8) byLings = 8;   // the rest stays at upstream base-defense priority
+            int target = allInZealots > byLings ? allInZealots : byLings;
+            return target > poolFirstZealots ? target : poolFirstZealots;
+        }
+        return poolFirst ? poolFirstZealots : 0;
+    }
+
+    // Probe count above which FFE probe production is moved below zealots during an all-in (0 = no cap)
+    inline int pvzProbeCap(bool enabled, bool allIn, int cap)
+    {
+        return (enabled && allIn && cap > 0) ? cap : 0;
+    }
 }

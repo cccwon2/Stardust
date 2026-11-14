@@ -6,6 +6,11 @@
 #include "Players.h"
 #include "Workers.h"
 #include "Opponent.h"
+#include "BnetConfig.h"
+#include "BnetLog.h"
+#include "BnetPolicy.h"
+
+#include <sstream>
 
 #include "Plays/Macro/SaturateBases.h"
 #include "Plays/MainArmy/DefendMyMain.h"
@@ -57,6 +62,23 @@ void PvZ::initialize(std::vector<std::shared_ptr<Play>> &plays, bool transitioni
         plays.emplace_back(std::make_shared<Corsairs>());
 
         std::string opening = openingOverride;
+
+        // Battle.net: fixed opening instead of the per-opponent UCB1 search (opponent names change every game there)
+        auto &bnetConfig = BnetConfig::get();
+        if (opening.empty() && !bnetConfig.forcedPvzOpening.empty())
+        {
+            if (bnetConfig.forcedPvzOpening == OurStrategyNames[OurStrategy::FFEDragoons] ||
+                bnetConfig.forcedPvzOpening == OurStrategyNames[OurStrategy::SairSpeedlot] ||
+                bnetConfig.forcedPvzOpening == OurStrategyNames[OurStrategy::EarlyGameDefense])
+            {
+                opening = bnetConfig.forcedPvzOpening;
+            }
+            else
+            {
+                BnetLog::event("forced_pvz_opening_unknown value=" + bnetConfig.forcedPvzOpening + " using=UCB1");
+            }
+        }
+
         if (opening.empty())
         {
             opening = Opponent::selectOpeningUCB1(
@@ -582,9 +604,27 @@ void PvZ::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
             int unitCount = zealotCount + dragoonCount;
             int cannonCount = Units::countCompleted(BWAPI::UnitTypes::Protoss_Photon_Cannon);
             int desiredZealots = std::max(1 - unitCount, (1 + (Units::countEnemy(BWAPI::UnitTypes::Zerg_Zergling) + 2) / 3) - cannonCount);
+
+            // Battle.net (pvz_antiallin_fix): minimum zealots vs. pool first, more and above probes vs. an all-in.
+            // Upstream subtracts completed cannons, so with two wall cannons and few scouted lings it stayed at one zealot.
+            auto &bnetConfig = BnetConfig::get();
+            bool bnetAllIn = bnetConfig.pvzAntiAllinFix && enemyStrategy == ZergStrategy::ZerglingAllIn;
+            bool bnetPoolFirst = bnetConfig.pvzAntiAllinFix &&
+                                 (enemyStrategy == ZergStrategy::PoolBeforeHatchery || bnetAllIn);
+            int bnetMinZealots = BnetPolicy::pvzMinZealots(bnetConfig.pvzAntiAllinFix,
+                                                           bnetPoolFirst,
+                                                           bnetAllIn,
+                                                           bnetConfig.pvzPoolFirstZealots,
+                                                           bnetConfig.pvzAllinZealots,
+                                                           Units::countEnemy(BWAPI::UnitTypes::Zerg_Zergling));
+            desiredZealots = std::max(desiredZealots, bnetMinZealots);
+            bnetLogDefenseState(BnetPolicy::pvzWallCannonTarget(bnetConfig.pvzAntiAllinFix, bnetPoolFirst, bnetConfig.pvzPoolFirstCannons),
+                                bnetMinZealots,
+                                BnetPolicy::pvzProbeCap(bnetConfig.pvzAntiAllinFix, bnetAllIn, bnetConfig.pvzAllinProbeCap));
+
             if (zealotCount < desiredZealots)
             {
-                prioritizedProductionGoals[PRIORITY_BASEDEFENSE].emplace_back(std::in_place_type<UnitProductionGoal>,
+                prioritizedProductionGoals[bnetAllIn ? (PRIORITY_EMERGENCY + 1) : PRIORITY_BASEDEFENSE].emplace_back(std::in_place_type<UnitProductionGoal>,
                                                                               "SE",
                                                                               BWAPI::UnitTypes::Protoss_Zealot,
                                                                               desiredZealots - zealotCount,
@@ -953,4 +993,20 @@ bool PvZ::isFFE()
     }
 
     return hasCannonAtWall();
+}
+
+void PvZ::bnetLogDefenseState(int wallCannons, int minZealots, int probeCap)
+{
+    if (!BnetConfig::get().pvzAntiAllinFix) return;
+
+    std::ostringstream os;
+    os << "pvz_defense enemy=" << ZergStrategyNames[enemyStrategy]
+       << " wall_cannons=" << wallCannons
+       << " min_zealots=" << minZealots
+       << " probe_cap=" << probeCap;
+    auto state = os.str();
+    if (state == bnetDefenseState) return;
+
+    bnetDefenseState = state;
+    BnetLog::event(state);
 }

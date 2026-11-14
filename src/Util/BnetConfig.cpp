@@ -173,6 +173,14 @@ namespace BnetConfig
                 read(json, "grid_waypoint_refresh_px", config.gridWaypointRefreshPx);
                 read(json, "spell_resend_interval_frames", config.spellResendIntervalFrames);
                 read(json, "unstick_backoff_max_frames", config.unstickBackoffMaxFrames);
+                read(json, "forced_pvz_opening", config.forcedPvzOpening);
+                read(json, "pvz_antiallin_fix", config.pvzAntiAllinFix);
+                read(json, "pvz_allin_base_lings", config.pvzAllinBaseLings);
+                read(json, "pvz_allin_seen_lings", config.pvzAllinSeenLings);
+                read(json, "pvz_pool_first_cannons", config.pvzPoolFirstCannons);
+                read(json, "pvz_pool_first_zealots", config.pvzPoolFirstZealots);
+                read(json, "pvz_allin_zealots", config.pvzAllinZealots);
+                read(json, "pvz_allin_probe_cap", config.pvzAllinProbeCap);
                 read(json, "print_build_info", config.printBuildInfo);
                 read(json, "bnet_log", config.bnetLog);
 
@@ -216,6 +224,12 @@ namespace BnetConfig
         config.gridWaypointRefreshPx = std::clamp(config.gridWaypointRefreshPx, 16, 160);
         config.spellResendIntervalFrames = std::clamp(config.spellResendIntervalFrames, 0, 96);
         config.unstickBackoffMaxFrames = std::clamp(config.unstickBackoffMaxFrames, 0, 480);
+        config.pvzAllinBaseLings = std::clamp(config.pvzAllinBaseLings, 0, 30);
+        config.pvzAllinSeenLings = std::clamp(config.pvzAllinSeenLings, 0, 40);
+        config.pvzPoolFirstCannons = std::clamp(config.pvzPoolFirstCannons, 2, 5);
+        config.pvzPoolFirstZealots = std::clamp(config.pvzPoolFirstZealots, 0, 6);
+        config.pvzAllinZealots = std::clamp(config.pvzAllinZealots, 0, 12);
+        config.pvzAllinProbeCap = config.pvzAllinProbeCap <= 0 ? 0 : std::clamp(config.pvzAllinProbeCap, 12, 40);
     }
 
     const Config &get()
@@ -278,6 +292,14 @@ namespace BnetConfig
            << " grid_waypoint_refresh_px=" << config.gridWaypointRefreshPx
            << " spell_resend_interval_frames=" << config.spellResendIntervalFrames
            << " unstick_backoff_max_frames=" << config.unstickBackoffMaxFrames
+           << " forced_pvz_opening=" << (config.forcedPvzOpening.empty() ? "UCB1" : config.forcedPvzOpening)
+           << " pvz_antiallin_fix=" << config.pvzAntiAllinFix
+           << " pvz_allin_base_lings=" << config.pvzAllinBaseLings
+           << " pvz_allin_seen_lings=" << config.pvzAllinSeenLings
+           << " pvz_pool_first_cannons=" << config.pvzPoolFirstCannons
+           << " pvz_pool_first_zealots=" << config.pvzPoolFirstZealots
+           << " pvz_allin_zealots=" << config.pvzAllinZealots
+           << " pvz_allin_probe_cap=" << config.pvzAllinProbeCap
            << " print_build_info=" << config.printBuildInfo
            << " bnet_log=" << config.bnetLog;
         return os.str();
