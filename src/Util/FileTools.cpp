@@ -50,7 +50,18 @@ namespace FileTools
         for (auto &path : pathsToTry)
         {
             auto filename = (std::ostringstream() << path << label << "." << fileType).str();
-            if (std::filesystem::exists(filename))
+            // Never let a path conversion error escape (e.g. non-ASCII names on a non-UTF-8 code page)
+            bool found = false;
+            try
+            {
+                std::error_code ec;
+                found = std::filesystem::exists(filename, ec);
+            }
+            catch (std::exception &)
+            {
+                found = false;
+            }
+            if (found)
             {
                 return filename;
             }

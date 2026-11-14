@@ -11,6 +11,8 @@
 #include "PathFinding.h"
 #include "FileTools.h"
 
+#include <cstring>
+
 namespace Opponent
 {
     namespace
@@ -21,6 +23,36 @@ namespace Opponent
         std::vector<nlohmann::json> previousGames;
         nlohmann::json currentGame;
         std::set<std::string> setKeys;
+
+        // Converts the opponent name into a file-name-safe ASCII key.
+        // ASCII names are lowercased with whitespace removed (same as upstream, so existing
+        // stardust_<name>.json files keep working). Non-ASCII bytes (e.g. Korean UTF-8 names) and
+        // characters that are invalid in Windows file names are hex-encoded as xHH, because
+        // std::filesystem throws when such a narrow path cannot be mapped to the system code page.
+        std::string sanitizeName(const std::string &raw)
+        {
+            static const char *hex = "0123456789abcdef";
+            std::string result;
+            result.reserve(raw.size());
+            for (char ch : raw)
+            {
+                auto c = static_cast<unsigned char>(ch);
+                if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f') continue;
+                bool safe = c >= 0x20 && c < 0x7f && std::strchr("<>:\"/\\|?*", c) == nullptr;
+                if (safe)
+                {
+                    result.push_back((c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : static_cast<char>(c));
+                }
+                else
+                {
+                    result.push_back('x');
+                    result.push_back(hex[c >> 4]);
+                    result.push_back(hex[c & 0xf]);
+                }
+            }
+            if (result.empty()) result = "unknown";
+            return result;
+        }
 
         std::string opponentDataFilename(bool writing = false)
         {
@@ -69,9 +101,7 @@ namespace Opponent
     {
         setKeys.clear();
 
-        name = BWAPI::Broodwar->enemy()->getName();
-        std::transform(name.begin(), name.end(), name.begin(), ::tolower);
-        name.erase(std::remove_if(name.begin(), name.end(), ::isspace), name.end());
+        name = sanitizeName(BWAPI::Broodwar->enemy()->getName());
 
         raceUnknown =
                 BWAPI::Broodwar->enemy()->getRace() != BWAPI::Races::Protoss &&
@@ -191,9 +221,7 @@ namespace Opponent
     {
         if (!name.empty()) return name;
 
-        name = BWAPI::Broodwar->enemy()->getName();
-        std::transform(name.begin(), name.end(), name.begin(), ::tolower);
-        name.erase(std::remove_if(name.begin(), name.end(), ::isspace), name.end());
+        name = sanitizeName(BWAPI::Broodwar->enemy()->getName());
 
         return name;
     }

@@ -262,6 +262,13 @@ below probe production. Army at the end: 2 zealots, 1 dragoon; 27 of 30 trained 
 - Log: `[EVENT] map_init_warning bwem_start_bases_incomplete` if some start location still has no base, and `[EVENT] map_init_error no_starting_main ...` if our own main is still missing (the bot would crash right after this line).
 - Not verified in game yet: mining from stacked minerals that touch the nexus.
 
+## Non-ASCII opponent names (2026-11-15)
+
+- Symptom: the bridge logs `AI host operation onStart threw a C++ exception: No mapping for the Unicode character exists in the target multi-byte code page.` and `stardust_bnet.log` gets no `[START]` line. Seen against computer players with Korean names; a Korean Battle.net nickname triggers the same path.
+- Cause: `Opponent::initialize` builds `stardust_<name>.json` from the raw UTF-8 player name and `std::filesystem::exists` throws while converting it to the Windows code page.
+- Fix: the opponent key is now file-name-safe ASCII. ASCII names are unchanged (lowercase, no spaces), so existing per-opponent files still load; non-ASCII bytes and Windows-invalid characters become `xHH`. `FileTools::getFilePath` also no longer lets path conversion errors escape.
+- The `opponent=` field in `stardust_bnet.log` shows the same key (for example `xedx83x80...` instead of the Korean name).
+
 ## Phase 3: Build script and summary log
 
 ### Build id at game start
