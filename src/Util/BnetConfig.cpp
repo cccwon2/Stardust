@@ -173,6 +173,16 @@ namespace BnetConfig
                 read(json, "grid_waypoint_refresh_px", config.gridWaypointRefreshPx);
                 read(json, "spell_resend_interval_frames", config.spellResendIntervalFrames);
                 read(json, "unstick_backoff_max_frames", config.unstickBackoffMaxFrames);
+                read(json, "micro_latency_frames", config.microLatencyFrames);
+                read(json, "in_flight_move_guard", config.inFlightMoveGuard);
+                read(json, "pvt_combat_commit", config.pvtCombatCommit);
+                read(json, "attack_commit_frames", config.attackCommitFrames);
+                read(json, "commit_max_loss", config.commitMaxLoss);
+                read(json, "attack_abort_stable_frames", config.attackAbortStableFrames);
+                read(json, "regroup_commit_frames", config.regroupCommitFrames);
+                read(json, "flee_guard", config.fleeGuard);
+                read(json, "flee_guard_max_loss", config.fleeGuardMaxLoss);
+                read(json, "flee_guard_speed_ratio", config.fleeGuardSpeedRatio);
                 read(json, "forced_pvz_opening", config.forcedPvzOpening);
                 read(json, "pvz_antiallin_fix", config.pvzAntiAllinFix);
                 read(json, "pvz_allin_base_lings", config.pvzAllinBaseLings);
@@ -224,6 +234,13 @@ namespace BnetConfig
         config.gridWaypointRefreshPx = std::clamp(config.gridWaypointRefreshPx, 16, 160);
         config.spellResendIntervalFrames = std::clamp(config.spellResendIntervalFrames, 0, 96);
         config.unstickBackoffMaxFrames = std::clamp(config.unstickBackoffMaxFrames, 0, 480);
+        config.microLatencyFrames = std::clamp(config.microLatencyFrames, -1, 12);
+        config.attackCommitFrames = std::clamp(config.attackCommitFrames, 0, 240);
+        config.commitMaxLoss = std::clamp(config.commitMaxLoss, 0.0, 1.0);
+        config.attackAbortStableFrames = std::clamp(config.attackAbortStableFrames, 6, 96);
+        config.regroupCommitFrames = std::clamp(config.regroupCommitFrames, 0, 240);
+        config.fleeGuardMaxLoss = std::clamp(config.fleeGuardMaxLoss, 0.0, 1.0);
+        config.fleeGuardSpeedRatio = std::clamp(config.fleeGuardSpeedRatio, 1.0, 3.0);
         config.pvzAllinBaseLings = std::clamp(config.pvzAllinBaseLings, 0, 30);
         config.pvzAllinSeenLings = std::clamp(config.pvzAllinSeenLings, 0, 40);
         config.pvzPoolFirstCannons = std::clamp(config.pvzPoolFirstCannons, 2, 5);
@@ -292,6 +309,16 @@ namespace BnetConfig
            << " grid_waypoint_refresh_px=" << config.gridWaypointRefreshPx
            << " spell_resend_interval_frames=" << config.spellResendIntervalFrames
            << " unstick_backoff_max_frames=" << config.unstickBackoffMaxFrames
+           << " micro_latency_frames=" << config.microLatencyFrames << "(eff=" << microLatencyFrames() << ")"
+           << " in_flight_move_guard=" << config.inFlightMoveGuard
+           << " pvt_combat_commit=" << config.pvtCombatCommit
+           << " attack_commit_frames=" << config.attackCommitFrames
+           << " commit_max_loss=" << config.commitMaxLoss
+           << " attack_abort_stable_frames=" << config.attackAbortStableFrames
+           << " regroup_commit_frames=" << config.regroupCommitFrames
+           << " flee_guard=" << config.fleeGuard
+           << " flee_guard_max_loss=" << config.fleeGuardMaxLoss
+           << " flee_guard_speed_ratio=" << config.fleeGuardSpeedRatio
            << " forced_pvz_opening=" << (config.forcedPvzOpening.empty() ? "UCB1" : config.forcedPvzOpening)
            << " pvz_antiallin_fix=" << config.pvzAntiAllinFix
            << " pvz_allin_base_lings=" << config.pvzAllinBaseLings
@@ -325,5 +352,25 @@ namespace BnetConfig
         // guard off mid-game.
         noteLatency();
         return BnetPolicy::autoCommandInterval(maxLatency);
+    }
+
+    int microLatencyFrames()
+    {
+        int reported = BWAPI::BroodwarPtr ? BWAPI::Broodwar->getLatencyFrames() : 0;
+        noteLatency();
+        return BnetPolicy::effectiveMicroLatency(config.microLatencyFrames, reported, maxLatency);
+    }
+
+    int microRemainingLatencyFrames()
+    {
+        if (!BWAPI::BroodwarPtr) return 0;
+        int reported = BWAPI::Broodwar->getLatencyFrames();
+        return BnetPolicy::effectiveRemainingLatency(BWAPI::Broodwar->getRemainingLatencyFrames(), reported, microLatencyFrames());
+    }
+
+    int predictionBufferFrames()
+    {
+        // Effective latency is capped at 12; callers ask for up to latency + 2
+        return 14;
     }
 }

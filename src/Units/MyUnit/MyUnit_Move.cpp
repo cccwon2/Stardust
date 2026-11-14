@@ -384,7 +384,7 @@ void MyUnitImpl::updateMoveWaypoints()
     }
 
     // For a direct move, resend the move command frequently to avoid units doing weird stuff because of collisions
-    if (lastMoveFrame < (currentFrame - BWAPI::Broodwar->getLatencyFrames() - 12))
+    if (lastMoveFrame < (currentFrame - BnetConfig::microLatencyFrames() - 12))
     {
         move(currentlyMovingTowards, true);
     }
@@ -527,7 +527,7 @@ void MyUnitImpl::updateChokePath(const BWEM::Area *unitArea)
 bool MyUnitImpl::unstickMoveUnit()
 {
     // First validate that the last move command was issued more than 6+LF frames ago
-    if ((currentFrame - lastMoveFrame) < (BWAPI::Broodwar->getLatencyFrames() + 6))
+    if ((currentFrame - lastMoveFrame) < (BnetConfig::microLatencyFrames() + 6))
     {
         return false;
     }
@@ -611,7 +611,7 @@ bool MyUnitImpl::unstickMoveUnit()
             CherryVis::log(id) << "Unstick by moving to neighbouring walkable tile";
 #endif
             move(best);
-            unstickUntil = currentFrame + BWAPI::Broodwar->getRemainingLatencyFrames() + 4;
+            unstickUntil = currentFrame + BnetConfig::microRemainingLatencyFrames() + 4;
             return true;
         }
     }
@@ -622,6 +622,6 @@ bool MyUnitImpl::unstickMoveUnit()
 
     // Reissue the move command
     move(currentlyMovingTowards, true);
-    unstickUntil = currentFrame + BWAPI::Broodwar->getRemainingLatencyFrames();
+    unstickUntil = currentFrame + BnetConfig::microRemainingLatencyFrames();
     return true;
 }

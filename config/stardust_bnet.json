@@ -39,6 +39,17 @@
   "spell_resend_interval_frames": 24,
   "unstick_backoff_max_frames": 192,
 
+  "micro_latency_frames": -1,
+  "in_flight_move_guard": true,
+  "pvt_combat_commit": true,
+  "attack_commit_frames": 48,
+  "commit_max_loss": 0.6,
+  "attack_abort_stable_frames": 24,
+  "regroup_commit_frames": 0,
+  "flee_guard": true,
+  "flee_guard_max_loss": 0.85,
+  "flee_guard_speed_ratio": 1.25,
+
   "forced_pvz_opening": "FFEDragoons",
   "pvz_antiallin_fix": true,
   "pvz_allin_base_lings": 6,

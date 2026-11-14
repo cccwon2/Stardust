@@ -66,6 +66,16 @@ int main(){
   w("{\"pvz_allin_probe_cap\": 0, \"pvz_pool_first_cannons\": 1}");
   BnetConfig::initialize(); c=BnetConfig::get();
   C(c.pvzAllinProbeCap==0 && c.pvzPoolFirstCannons==2);
+  // Combat fix defaults and clamping
+  w("{}"); BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.microLatencyFrames==-1 && c.inFlightMoveGuard && c.pvtCombatCommit && c.attackCommitFrames==48 && c.commitMaxLoss==0.6);
+  C(c.attackAbortStableFrames==24 && c.regroupCommitFrames==0 && c.fleeGuard && c.fleeGuardMaxLoss==0.85 && c.fleeGuardSpeedRatio==1.25);
+  w("{\"micro_latency_frames\": 40, \"attack_commit_frames\": 999, \"commit_max_loss\": 3, \"attack_abort_stable_frames\": 1, \"regroup_commit_frames\": -5, \"flee_guard\": false, \"flee_guard_max_loss\": -1, \"flee_guard_speed_ratio\": 0.5, \"in_flight_move_guard\": false, \"pvt_combat_commit\": false}");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.microLatencyFrames==12 && c.attackCommitFrames==240 && c.commitMaxLoss==1.0 && c.attackAbortStableFrames==6 && c.regroupCommitFrames==0);
+  C(!c.fleeGuard && c.fleeGuardMaxLoss==0.0 && c.fleeGuardSpeedRatio==1.0 && !c.inFlightMoveGuard && !c.pvtCombatCommit);
+  w("{\"micro_latency_frames\": -7}"); BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.microLatencyFrames==-1);
   printf("%s\n", BnetConfig::summary().c_str());
   printf("fails=%d\n",fails); return fails;
 }

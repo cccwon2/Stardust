@@ -1,4 +1,5 @@
 #include "Unit.h"
+#include "BnetConfig.h"
 
 #include "Geo.h"
 #include "Players.h"
@@ -121,7 +122,9 @@ UnitImpl::UnitImpl(BWAPI::Unit unit)
 
 void UnitImpl::created()
 {
-    predictedPositions.resize(BWAPI::Broodwar->getLatencyFrames() + 2);
+    // Battle.net: sized for the largest micro latency (+2) instead of the latency reported at creation, since Remastered
+    // reports 5 at game start and 3 later and callers now use the effective micro latency
+    predictedPositions.resize(BnetConfig::predictionBufferFrames());
 
     beingManufacturedOrCarried = isBeingManufacturedOrCarried();
 

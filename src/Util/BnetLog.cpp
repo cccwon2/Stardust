@@ -83,6 +83,10 @@ namespace BnetLog
         int gridHolds = 0;
         int unstickBackoffs = 0;
         int repeatedOrdersSkipped = 0;
+        int attackCommitHolds = 0;
+        int regroupCommitHolds = 0;
+        int fleeGuardFights = 0;
+        int dragoonUnsticks = 0;
         int mechGateState = -1;     // -1 unknown, 0 open, 1 blocked
         int mechGateBlocks = 0;     // Number of open -> blocked transitions
     }
@@ -125,6 +129,22 @@ namespace BnetLog
         repeatedOrdersSkipped++;
     }
 
+    void combatCommitHold(bool attack)
+    {
+        if (attack) attackCommitHolds++;
+        else regroupCommitHolds++;
+    }
+
+    void fleeGuardFight()
+    {
+        fleeGuardFights++;
+    }
+
+    void dragoonUnstick()
+    {
+        dragoonUnsticks++;
+    }
+
     ResourceOrderStats &resourceOrders()
     {
         return resourceOrderStats;
@@ -154,6 +174,10 @@ namespace BnetLog
             gridHolds = 0;
             unstickBackoffs = 0;
             repeatedOrdersSkipped = 0;
+            attackCommitHolds = 0;
+            regroupCommitHolds = 0;
+            fleeGuardFights = 0;
+            dragoonUnsticks = 0;
             mechGateState = -1;
             mechGateBlocks = 0;
         }
@@ -186,6 +210,11 @@ namespace BnetLog
                << " grid_holds=" << gridHolds
                << " unstick_backoffs=" << unstickBackoffs
                << " orders_repeat_skipped=" << repeatedOrdersSkipped
+               << " attack_commit_holds=" << attackCommitHolds
+               << " regroup_commit_holds=" << regroupCommitHolds
+               << " flee_guard_fights=" << fleeGuardFights
+               << " dragoon_unsticks=" << dragoonUnsticks
+               << " micro_latency=" << BnetConfig::microLatencyFrames()
                << " mech_gate_blocks=" << mechGateBlocks
                << " latency_max=" << BnetConfig::maxLatencyFrames()
                << " cmd_interval=" << BnetConfig::commandIntervalFrames();
