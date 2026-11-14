@@ -16,8 +16,21 @@ namespace Workers
 
     void issueOrders();
 
-    // Number of stuck gathering workers force-reassigned this game (Battle.net stacked mineral fallback)
+    // Battle.net stuck worker recovery counters for this game
+    struct BnetRecoveryStats
+    {
+        int attempts = 0;        // Recovery attempts (worker detected as stuck and off cooldown)
+        int reassigned = 0;      // Issued recoveries that moved the worker to a different patch
+        int commandOk = 0;       // Recovery commands actually issued (reassignment or plain re-gather)
+        int commandFailed = 0;   // Recovery commands rejected / no visible target (assignment kept)
+        int budgetDeferred = 0;  // Attempts deferred because max_orders_per_frame was exhausted
+    };
+
+    // Number of stuck gathering workers successfully reassigned to another patch this game
+    // (before this change it counted every reassignment attempt)
     int bnetStuckReassignments();
+
+    const BnetRecoveryStats &bnetRecoveryStats();
 
     // Whether the given worker unit can currently be reassigned to non-gathering duties
     bool isAvailableForReassignment(const MyWorker &unit, bool allowCarryMinerals, bool allowMining);

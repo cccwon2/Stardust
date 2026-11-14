@@ -9,6 +9,7 @@
 #include "Boids.h"
 #include "Strategist.h"
 #include "BnetConfig.h"
+#include "BnetPolicy.h"
 
 #include "DebugFlag_UnitOrders.h"
 #include "MiningOptimizationV2/DataModel/MapData.h"
@@ -173,16 +174,11 @@ namespace Workers
         std::map<MyWorker, InitialWorkerState> initialSplitState;
 
         // Battle.net safe mining / stuck worker fallback state
-        struct StuckWorkerState
-        {
-            BWAPI::Position position = BWAPI::Positions::Invalid;
-            bool carrying = false;
-            int sinceFrame = 0;
-        };
-        std::map<MyWorker, StuckWorkerState> stuckWorkerState;
+        std::map<MyWorker, BnetPolicy::StuckState> stuckWorkerState;
+        std::map<MyWorker, int> lastRecoveryFrame;    // Frame of the last stuck-recovery attempt per worker (cooldown)
         std::set<MyWorker> simpleGatherWorkers;       // Workers forced into simple gather mode after being detected as stuck
         std::map<Base *, bool> stackedMineralBases;   // Cache: whether a base has stacked / overlapping mineral patches
-        int stuckReassignments = 0;
+        BnetRecoveryStats recoveryStats;
 
         // Whether a base has mineral patches on the same tile or overlapping each other (fast-infinite / modified melee maps)
         bool hasStackedMinerals(Base *base)
@@ -226,75 +222,113 @@ namespace Workers
             return hasStackedMinerals(base);
         }
 
-        // Tracks whether a gathering worker has made no progress (position / cargo) for too long.
-        // Returns true if the worker should be considered stuck.
-        bool isStuckGatheringWorker(const MyWorker &worker)
+        // Tracks whether a cargo-less worker approaching / waiting at its patch has made no progress for too long.
+        // Returns true if the worker should be considered stuck. See BnetPolicy::updateStuck for the exact rules.
+        bool isStuckGatheringWorker(const MyWorker &worker, const Resource &mineralPatch)
         {
-            auto &state = stuckWorkerState[worker];
             auto order = worker->bwapiUnit->getOrder();
-            bool carrying = worker->bwapiUnit->isCarryingMinerals();
-            auto position = worker->bwapiUnit->getPosition();
+            BnetPolicy::GatherPhase phase = BnetPolicy::GatherPhase::Other;
+            if (order == BWAPI::Orders::MoveToMinerals) phase = BnetPolicy::GatherPhase::MovingToMinerals;
+            else if (order == BWAPI::Orders::WaitForMinerals) phase = BnetPolicy::GatherPhase::WaitingForMinerals;
 
-            // Mining itself legitimately takes ~80 frames standing still, and only gathering states are monitored
-            bool monitored = worker->bwapiUnit->isGatheringMinerals() && order != BWAPI::Orders::MiningMinerals;
-            if (!monitored || !state.position.isValid() || carrying != state.carrying ||
-                position.getApproxDistance(state.position) > 2)
+            // Waiting while another worker mines the patch is normal queueing, not a fault
+            bool beingMinedByOther = false;
+            if (phase == BnetPolicy::GatherPhase::WaitingForMinerals)
             {
-                state.position = position;
-                state.carrying = carrying;
-                state.sinceFrame = currentFrame;
-                return false;
+                auto patchUnit = mineralPatch ? mineralPatch->getBwapiUnitIfVisible() : nullptr;
+                beingMinedByOther = patchUnit && patchUnit->isBeingGathered();
             }
 
-            // Waiting at a patch occupied by another worker can legitimately last a full mining cycle, so allow double
-            int threshold = BnetConfig::get().stuckWorkerFrames;
-            if (order == BWAPI::Orders::WaitForMinerals) threshold *= 2;
-            return (currentFrame - state.sinceFrame) >= threshold;
+            auto position = worker->bwapiUnit->getPosition();
+            BnetPolicy::StuckInput input{
+                    currentFrame,
+                    worker->bwapiUnit->isCarryingMinerals() || worker->bwapiUnit->isCarryingGas(),
+                    phase,
+                    beingMinedByOther,
+                    position.x,
+                    position.y,
+                    mineralPatch.get()};
+            return BnetPolicy::updateStuck(stuckWorkerState[worker], input, BnetConfig::get().stuckWorkerFrames);
         }
 
-        // Moves a stuck worker to a different mineral patch at the same base and switches it to simple gather mode
-        bool reassignStuckWorker(const MyWorker &worker, Base *base)
+        // Attempts to recover a stuck (cargo-less) worker by moving it to a different mineral patch at the same base, or
+        // re-issuing a plain gather to its current patch when there is no alternative.
+        // The internal assignment is only changed after the command is actually issued. Attempts are rate-limited per worker
+        // by stuck_worker_frames; a budget-deferred attempt is retried after latencyFrames + 2.
+        // Returns true if a command was issued for the worker this frame.
+        bool recoverStuckWorker(const MyWorker &worker, Base *base, const Resource &current)
         {
-            if (!base) return false;
-            auto current = workerMineralPatch[worker];
+            int cooldown = BnetConfig::get().stuckWorkerFrames;
+            auto lastIt = lastRecoveryFrame.find(worker);
+            int last = lastIt == lastRecoveryFrame.end() ? -1 : lastIt->second;
+            if (!BnetPolicy::recoveryAllowed(last, currentFrame, cooldown)) return false;
+
+            recoveryStats.attempts++;
 
             Resource best = nullptr;
             size_t bestWorkers = SIZE_MAX;
             int bestDist = INT_MAX;
-            for (const auto &patch : base->mineralPatches())
+            if (base)
             {
-                if (patch == current || patch->destroyed) continue;
-                if (!patch->getBwapiUnitIfVisible()) continue;
-
-                size_t workers = mineralPatchWorkers[patch].size();
-                int dist = patch->getDistance(worker);
-                if (workers < bestWorkers || (workers == bestWorkers && dist < bestDist))
+                for (const auto &patch : base->mineralPatches())
                 {
-                    best = patch;
-                    bestWorkers = workers;
-                    bestDist = dist;
+                    if (patch == current || patch->destroyed) continue;
+                    if (!patch->getBwapiUnitIfVisible()) continue;
+
+                    size_t workers = mineralPatchWorkers[patch].size();
+                    int dist = patch->getDistance(worker);
+                    if (workers < bestWorkers || (workers == bestWorkers && dist < bestDist))
+                    {
+                        best = patch;
+                        bestWorkers = workers;
+                        bestDist = dist;
+                    }
                 }
             }
 
-            stuckWorkerState.erase(worker);
-            simpleGatherWorkers.insert(worker);
-            stuckReassignments++;
+            auto target = best ? best : current;
+            auto targetUnit = (target && !target->destroyed) ? target->getBwapiUnitIfVisible() : nullptr;
 
-            if (!best)
+            // Restart detection either way so a failed attempt does not re-trigger on the next frame
+            stuckWorkerState.erase(worker);
+
+            auto result = targetUnit
+                          ? worker->recoveryGather(targetUnit)
+                          : BnetPolicy::RecoveryCommandResult::Rejected;
+
+            if (result == BnetPolicy::RecoveryCommandResult::BudgetExhausted)
             {
-                // No alternative patch: just reissue a plain gather to the current one
-                auto bwapiPatch = current ? current->getBwapiUnitIfVisible() : nullptr;
-                if (bwapiPatch) worker->gather(bwapiPatch);
-                Log::Get() << "Stuck worker " << *worker << " has no alternative patch; reissued plain gather";
-                return true;
+                // Retry after latencyFrames + 2 instead of the full cooldown
+                recoveryStats.budgetDeferred++;
+                lastRecoveryFrame[worker] = currentFrame - cooldown + BWAPI::Broodwar->getLatencyFrames() + 2;
+                return false;
             }
 
-            if (current) mineralPatchWorkers[current].erase(worker);
-            workerMineralPatch[worker] = best;
-            mineralPatchWorkers[best].insert(worker);
+            lastRecoveryFrame[worker] = currentFrame;
 
-            Log::Get() << "Stuck worker " << *worker << " reassigned to " << *best << " (simple gather mode)";
-            worker->gather(best->getBwapiUnitIfVisible());
+            if (result == BnetPolicy::RecoveryCommandResult::Rejected)
+            {
+                recoveryStats.commandFailed++;
+                Log::Get() << "Stuck worker " << *worker << " recovery command failed; keeping assignment";
+                return false;
+            }
+
+            recoveryStats.commandOk++;
+            simpleGatherWorkers.insert(worker);
+
+            if (best)
+            {
+                if (current) mineralPatchWorkers[current].erase(worker);
+                workerMineralPatch[worker] = best;
+                mineralPatchWorkers[best].insert(worker);
+                recoveryStats.reassigned++;
+                Log::Get() << "Stuck worker " << *worker << " reassigned to " << *best << " (simple gather mode)";
+            }
+            else
+            {
+                Log::Get() << "Stuck worker " << *worker << " has no alternative patch; reissued plain gather";
+            }
+
             return true;
         }
 
@@ -344,6 +378,7 @@ namespace Workers
         {
             workerJob.erase(unit);
             stuckWorkerState.erase(unit);
+            lastRecoveryFrame.erase(unit);
             simpleGatherWorkers.erase(unit);
             removeFromResource(unit, workerMineralPatch, mineralPatchWorkers);
             removeFromResource(unit, workerRefinery, refineryWorkers);
@@ -684,14 +719,20 @@ namespace Workers
         refineryWorkers.clear();
         initialSplitState.clear();
         stuckWorkerState.clear();
+        lastRecoveryFrame.clear();
         simpleGatherWorkers.clear();
         stackedMineralBases.clear();
-        stuckReassignments = 0;
+        recoveryStats = BnetRecoveryStats();
     }
 
     int bnetStuckReassignments()
     {
-        return stuckReassignments;
+        return recoveryStats.reassigned;
+    }
+
+    const BnetRecoveryStats &bnetRecoveryStats()
+    {
+        return recoveryStats;
     }
 
     void onUnitDestroy(const Unit &unit)
@@ -961,10 +1002,11 @@ namespace Workers
                     // Battle.net: decide whether this worker bypasses the mining optimizer
                     bool simpleGather = useSimpleGather(worker, base);
 
-                    // Stuck / stacked mineral fallback: force reassignment when a gathering worker makes no progress
-                    if (mineralPatch && BnetConfig::get().stackedMineralFallback && isStuckGatheringWorker(worker))
+                    // Stuck / stacked mineral fallback: recover a cargo-less worker that makes no progress towards its patch.
+                    // Workers carrying cargo are never reassigned here (detection resets), so cargo return below is not skipped.
+                    if (mineralPatch && BnetConfig::get().stackedMineralFallback && isStuckGatheringWorker(worker, mineralPatch))
                     {
-                        if (reassignStuckWorker(worker, base)) continue;
+                        if (recoverStuckWorker(worker, base, mineralPatch)) continue;
                     }
 
                     // If the worker has cargo, return it

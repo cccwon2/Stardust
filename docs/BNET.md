@@ -18,11 +18,35 @@ Comments (`//`, `/* */`) are allowed. The template is `config/stardust_bnet.json
 | Key | Default | Effect |
 | --- | --- | --- |
 | `safe_bnet_mining` | `true` | Bypasses the MiningOptimizationV2 optimized initial split, start-of-mining and return-of-resource path optimizations (all frame-exact resends). Workers use plain `gather()` / `returnCargo()` only, and are never re-ordered while already moving to, waiting at, or mining their patch. Resource command guards (below) are also active only in this mode. |
-| `stacked_mineral_fallback` | `true` | Detects bases with stacked/overlapping mineral patches (same tile or centers < 24px apart) and uses simple gather mode there even when `safe_bnet_mining` is off. Also force-reassigns any gathering worker with no position/cargo change for `stuck_worker_frames` (doubled while in `WaitForMinerals`) to another patch, and switches that worker to simple gather mode for the rest of the game. |
+| `stacked_mineral_fallback` | `true` | Detects bases with stacked/overlapping mineral patches (same tile or centers < 24px apart) and uses simple gather mode there even when `safe_bnet_mining` is off. Also recovers stuck workers (see "Stuck worker recovery" below). |
 | `stuck_worker_frames` | `48` | Stuck detection threshold (clamped 12-1000). |
 | `max_orders_per_frame` | `0` | Cap on worker resource orders (gather / return cargo / resource right-click) per frame. `0` = unlimited. |
 | `min_command_interval_frames` | `-1` | Minimum frames between identical commands to the same unit. `-1` = auto: `latencyFrames + 2` when `getLatencyFrames() > 4`, otherwise off. Applies to repeated same-target move orders always, and to same-target gather / return / resource right-click in safe mining mode. |
 | `enable_auto_gg` | `false` | Enables the surrender logic (send "gg" and leave). Previously this was always on in `VS_HUMAN` builds. The surrender condition itself is unchanged and strict: no probes, no nexus or < 50 minerals, no mobile combat unit, and an enemy combat unit at one of our bases. |
+
+### Stuck worker recovery
+
+Only cargo-less workers in `MoveToMinerals` or `WaitForMinerals` are monitored. The timer resets when the worker moves more
+than 2px, picks up or carries cargo (minerals or gas), changes patch, switches to any other order (`MiningMinerals`,
+returning cargo, building, ...), or is not observed on the previous frame (job change, reserved, lost). `WaitForMinerals`
+while another worker is mining the same patch is normal queueing and never counts. A worker carrying cargo is never
+reassigned to another patch.
+
+After `stuck_worker_frames` without progress, a recovery is attempted:
+
+- Target: the least-occupied visible patch at the same base, or the current patch if there is no alternative.
+- Command: `MyWorkerImpl::recoveryGather`, which bypasses the duplicate-command guards (same-command interval,
+  already doing it) so a plain re-gather to the same patch is never permanently blocked, but still respects
+  `max_orders_per_frame` and the one-order-per-frame rule. It is not a forced resend loop.
+- Rate limit: one attempt per worker per `stuck_worker_frames` frames. If the per-frame budget is exhausted the attempt is
+  retried after `latencyFrames + 2` frames.
+- The internal patch assignment changes only after the command is actually issued. A rejected command (or no visible
+  target) keeps the assignment and is counted as a failure.
+- After an issued recovery the worker stays in simple gather mode for the rest of the game.
+
+Counters (`Workers::bnetRecoveryStats()`): attempts, reassigned (issued and moved to another patch), command ok, command
+failed, budget deferred. `stuck_reassign` in the log now means successful reassignments to a different patch; before this
+change it counted every reassignment attempt.
 
 ## Code map (actual upstream paths)
 

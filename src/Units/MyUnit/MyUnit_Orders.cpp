@@ -258,6 +258,31 @@ bool MyWorkerImpl::gather(BWAPI::Unit target)
     return result;
 }
 
+BnetPolicy::RecoveryCommandResult MyWorkerImpl::recoveryGather(BWAPI::Unit target)
+{
+    if (!target || !target->exists()) return BnetPolicy::RecoveryCommandResult::Rejected;
+    if (issuedOrderThisFrame)
+    {
+        Log::Get() << "DUPLICATE ORDER: " << *this << ": Recovery gather " << target->getType();
+        return BnetPolicy::RecoveryCommandResult::Rejected;
+    }
+
+    if (!resourceOrderBudgetAvailable()) return BnetPolicy::RecoveryCommandResult::BudgetExhausted;
+
+    auto result = bwapiUnit->gather(target);
+    if (!result) return BnetPolicy::RecoveryCommandResult::Rejected;
+
+    issuedOrderThisFrame = true;
+    gatherCommandFrames.insert(currentFrame);
+    countResourceOrder();
+
+#if DEBUG_UNIT_ORDERS
+    CherryVis::log(id) << "Order: Recovery gather " << BWAPI::WalkPosition(target->getPosition());
+#endif
+
+    return BnetPolicy::RecoveryCommandResult::Issued;
+}
+
 bool MyWorkerImpl::returnCargo()
 {
     if (issuedOrderThisFrame)
