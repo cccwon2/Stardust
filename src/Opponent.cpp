@@ -1,4 +1,5 @@
 #include "Opponent.h"
+#include "BnetLog.h"
 
 #include <fstream>
 #include <ranges>
@@ -271,11 +272,13 @@ namespace Opponent
 
     void addMyStrategyChange(const std::string &strategy)
     {
+        BnetLog::myStrategyChanged(strategy);
         currentGame["myStrategy"].push_back(nlohmann::json::array({currentFrame, strategy}));
     }
 
     void addEnemyStrategyChange(const std::string &strategy)
     {
+        BnetLog::enemyStrategyChanged(strategy);
         currentGame["enemyStrategy"].push_back(nlohmann::json::array({currentFrame, strategy}));
     }
 

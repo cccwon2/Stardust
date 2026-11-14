@@ -49,3 +49,18 @@ Recognizer changes (`PvTEnemyStrategyRecognizer.cpp`, only when `pluto_pvt_snipe
 
 Mid-game vs bio: keep at least `max(4, dragoons)` zealots with leg enhancements started at 2 zealots, and allow arbiters vs `MidGameBio` / `MidGameBioMech` under upstream's conditions (3 nexuses, 20+ army). High templar storm is not added because Stardust has no high templar micro.
 
+## Phase 3: Build script and summary log
+
+- `scripts/build-bnet.ps1`: configures with `-G "Visual Studio 17 2022" -A Win32 -DTOURNAMENT_BUILD=ON` (which also skips the `windbg` target), builds only the `Stardust` target in Release, and copies `Stardust.dll` plus `config/stardust_bnet.json` to `dist/bwapi-data/AI/`. An existing `dist/.../stardust_bnet.json` is kept unless `-OverwriteConfig`; the defaults are always written to `stardust_bnet.default.json`. Options: `-Clean`, `-VsHuman`, `-NoBnetLog`, `-BuildDir`, `-DistDir`.
+- CMake option `BNET_LOG` (default `ON`) compiles the summary log in, independent of `LOGGING_ENABLED` (which `TOURNAMENT_BUILD` turns off). Runtime switch: `bnet_log`.
+- Log file `bwapi-data/write/stardust_bnet.log`, appended, one line per event, flushed immediately:
+
+```
+2026-11-15 21:03:11 f=0 t=0:00 [START] map="..." opponent="..." enemy_race=Terran latency_frames=6 battlenet=1 multiplayer=1 config=bwapi-data/AI/stardust_bnet.json safe_bnet_mining=1 ...
+2026-11-15 21:03:11 f=0 t=0:00 [OURS] from=- to=EarlyGameDefense
+2026-11-15 21:06:02 f=4100 t=2:52 [ENEMY] from=Unknown to=TwoFactory
+2026-11-15 21:07:14 f=5760 t=4:01 [APM] apm=142 latency_frames=6 supply=31 stuck_reassign=0
+2026-11-15 21:20:40 f=24500 t=17:09 [END] result=WIN avg_apm=160 max_sampled_apm=171 final_enemy_strategy=MidGameMech final_our_strategy=MidGame stuck_reassign=1
+```
+
+`[APM]` is written every 2 game minutes using `BWAPI::Game::getAPM(false)`; `[EVENT]` records `opponent_left` and `surrender`.

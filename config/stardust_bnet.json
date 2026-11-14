@@ -11,5 +11,7 @@
   "forced_random_opening": "OneGateCore",
   "early_observer_priority": true,
   "natural_cannons": 1,
-  "bio_aggression_scale": 0.7
+  "bio_aggression_scale": 0.7,
+
+  "bnet_log": true
 }

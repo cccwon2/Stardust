@@ -4,6 +4,7 @@ project(Stardust)
 set(CMAKE_CXX_STANDARD 23)
 
 option(VS_HUMAN "Vs. Human Build" OFF)
+option(BNET_LOG "Lightweight Battle.net summary log (bwapi-data/write/stardust_bnet.log)" ON)
 
 IF(MSVC)
     option(TOURNAMENT_BUILD "Tournament build" OFF)

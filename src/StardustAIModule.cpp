@@ -1,5 +1,6 @@
 #include "StardustAIModule.h"
 #include "BnetConfig.h"
+#include "BnetLog.h"
 
 #include "Timer.h"
 #include "Map.h"
@@ -87,6 +88,9 @@ void StardustAIModule::onStart()
     Producer::initialize();
     PerformanceManager::initialize();
 
+    // Battle.net summary log: start line (map, latency, active JSON options); must be before strategy initialization
+    BnetLog::gameStart();
+
     Log::SetDebug(true);
     CherryVis::initialize();
 
@@ -157,6 +161,7 @@ void StardustAIModule::onEnd(bool isWinner)
     WorkerMiningInstrumentation::writeGameEndInstrumentation();
 #endif
 
+    BnetLog::gameEnd(isWinner);
     Opponent::gameEnd(isWinner);
     WORKERGATHEROPTIMIZER::gameEnd();
     CherryVis::gameEnd();
@@ -187,6 +192,8 @@ void StardustAIModule::onFrame()
     }
 #endif
 
+    BnetLog::onFrame();
+
     Timer::start("Frame");
     PerformanceManager::frameStart();
 
@@ -197,6 +204,7 @@ void StardustAIModule::onFrame()
             && currentFrame > 100)
         {
             Log::Get() << "Opponent has left the game";
+            BnetLog::event("opponent_left");
             gameFinished = true;
             return;
         }
@@ -336,6 +344,7 @@ void StardustAIModule::onFrame()
                 if (enemyInBase)
                 {
                     Log::Get() << "Surrendering";
+                    BnetLog::event("surrender");
                     BWAPI::Broodwar->sendText("gg");
                     gameFinished = true;
                     BWAPI::Broodwar->leaveGame();
