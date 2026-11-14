@@ -769,6 +769,32 @@ bool MapImpl::FindBasesForStartingLocations()
 					found = true;
 				}
 
+		// Stardust bnet fallback: some maps (e.g. OdysseyRE 2.0) stack the main minerals directly
+		// next to the start location, so the base finder places the main base a few tiles away.
+		// Assign the nearest unassigned base (same area preferred) within a wider radius instead of
+		// leaving the starting location without a base, which crashes the bot during onStart.
+		if (!found)
+		{
+			const int fallbackMaxTiles = 12;
+			const Area * startArea = GetArea(location);
+			Base * best = nullptr;
+			int bestScore = std::numeric_limits<int>::max();
+			for (Area & area : GetGraph().Areas())
+				for (Base & base : area.Bases())
+				{
+					if (base.Starting()) continue;
+					int d = queenWiseDist(base.Location(), location);
+					if (d > fallbackMaxTiles) continue;
+					int score = d + ((startArea && base.GetArea() != startArea) ? 100 : 0);
+					if (score < bestScore) { bestScore = score; best = &base; }
+				}
+			if (best)
+			{
+				best->SetStartingLocation(location);
+				found = true;
+			}
+		}
+
 		 if (!found) atLeastOneFailed = true;
 	}
 

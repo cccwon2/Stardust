@@ -1,6 +1,7 @@
 #include "Map.h"
 
 #include <ranges>
+#include <sstream>
 
 #include "MapSpecificOverrides/Alchemist.h"
 #include "MapSpecificOverrides/Arcadia.h"
@@ -24,6 +25,7 @@
 #include "Opponent.h"
 
 #include "NoGoAreas.h"
+#include "BnetLog.h"
 
 #if INSTRUMENTATION_ENABLED
 #define CVIS_HEATMAPS true
@@ -939,6 +941,10 @@ namespace Map
         BWEM::Map::Instance().EnableAutomaticPathAnalysis();
         bool bwem = BWEM::Map::Instance().FindBasesForStartingLocations();
         Log::Debug() << "Initialized BWEM: " << bwem;
+        if (!bwem)
+        {
+            BnetLog::event("map_init_warning bwem_start_bases_incomplete");
+        }
 
         // Select map-specific overrides
         if (BWAPI::Broodwar->mapHash() == "83320e505f35c65324e93510ce2eafbaa71c9aa1")
@@ -1116,6 +1122,13 @@ namespace Map
             }
         }
         Log::Debug() << "Found " << bases.size() << " bases";
+        if (!playerToPlayerBases[BWAPI::Broodwar->self()].startingMain)
+        {
+            std::ostringstream msg;
+            msg << "map_init_error no_starting_main start=" << BWAPI::Broodwar->self()->getStartLocation()
+                << " bases=" << bases.size();
+            BnetLog::event(msg.str());
+        }
 
         if (playerToPlayerBases[BWAPI::Broodwar->self()].startingMainChoke)
         {

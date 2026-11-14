@@ -254,6 +254,14 @@ below probe production. Army at the end: 2 zealots, 1 dragoon; 27 of 30 trained 
 - Log: `[EVENT] pvz_allin_detect lings_at_bases=.. lings_alive=.. from=..` when the extra rule fires, and `[EVENT] pvz_defense enemy=.. wall_cannons=.. min_zealots=.. probe_cap=..` whenever the FFEDragoons defense targets change. An unknown `forced_pvz_opening` writes `[EVENT] forced_pvz_opening_unknown`.
 - Not changed: zergling recognition before the opening is known, `ZerglingRush` handling (the FFE play already cancels the natural and defends the main), other PvZ strategies, unit micro.
 
+## Stacked-mineral start bases (2026-11-15 OdysseyRE 2.0)
+
+- Symptom: on (2)OdysseyRE 2.0 the log stops right after `[START]`; the bridge reports `AI host operation onStart failed with Windows exception 0xc0000005` and quarantines the runtime. The quarantine lasts until StarCraft is restarted, so every later game in the same StarCraft process looks like "probes do nothing" even on normal maps.
+- Cause: the main minerals (8 patches) are stacked on one spot directly below the start location. The base finder (`3rdparty/BWEM/src/BaseFinder.cpp`) blocks depot tiles near minerals, so it places the main base 6 tiles away. BWEM only matches a starting location to a base within 3 tiles (`max_tiles_between_StartingLocation_and_its_AssignedBase`), so the start location gets no base, `Map::getMyMain()` is null and `BuildingPlacement::initialize` crashes.
+- Fix: `MapImpl::FindBasesForStartingLocations` now falls back to the nearest not-yet-starting base within 12 tiles (same area preferred) and moves it to the real start location. Maps where the normal 3-tile match works are unchanged.
+- Log: `[EVENT] map_init_warning bwem_start_bases_incomplete` if some start location still has no base, and `[EVENT] map_init_error no_starting_main ...` if our own main is still missing (the bot would crash right after this line).
+- Not verified in game yet: mining from stacked minerals that touch the nexus.
+
 ## Phase 3: Build script and summary log
 
 ### Build id at game start
