@@ -28,7 +28,7 @@ AI for StarCraft: Brood War
 
 ### Windows 빌드와 배포
 
-필요 도구: Visual Studio 2022의 Desktop development with C++ 워크로드(MSVC v143, Windows SDK), CMake 3.24 이상, Windows PowerShell 5.1.
+필요 도구: Visual Studio 2022 또는 2026의 Desktop development with C++ 워크로드(MSVC v143/v145, Windows SDK, Windows용 C++ CMake 도구), Windows PowerShell 5.1. CMake는 VS 2022에서 3.24 이상, VS 2026에서 4.2 이상이 필요하며 Visual Studio에 포함된 CMake를 자동으로 찾습니다.
 
 저장소 루트에서 실행합니다.
 
@@ -36,7 +36,7 @@ AI for StarCraft: Brood War
 powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 ```
 
-[빌드 스크립트](scripts/build-bnet.ps1)는 `-G "Visual Studio 17 2022" -A Win32 -DTOURNAMENT_BUILD=ON`으로 구성하고, `Stardust` 타겟만 Release로 빌드합니다. `windbg` 타겟은 제외됩니다.
+[빌드 스크립트](scripts/build-bnet.ps1)는 설치된 Visual Studio 중 최신 버전에 맞춰 `-G "Visual Studio 18 2026"` 또는 `-G "Visual Studio 17 2022"`와 `-A Win32 -DTOURNAMENT_BUILD=ON`으로 구성하고(`-Generator`로 직접 지정 가능), `Stardust` 타겟만 Release로 빌드합니다. `windbg` 타겟은 제외됩니다.
 
 - 출력: `dist/bwapi-data/AI/Stardust.dll`
 - 운영 설정: `dist/bwapi-data/AI/stardust_bnet.json`

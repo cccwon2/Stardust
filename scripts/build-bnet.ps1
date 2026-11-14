@@ -5,8 +5,10 @@
 
 .DESCRIPTION
     Requirements:
-      - Visual Studio 2022 with "Desktop development with C++" (MSVC v143, Windows SDK)
-      - CMake 3.24 or newer (the copy bundled with Visual Studio is found automatically)
+      - Visual Studio 2022 or 2026 with "Desktop development with C++" (MSVC v143 / v145, Windows SDK,
+        C++ CMake tools for Windows). The newest install is used; override with -Generator.
+      - CMake 3.24+ for VS 2022, 4.2+ for VS 2026 (the copy bundled with Visual Studio is found automatically)
+      - An existing build directory configured with another generator needs -Clean.
 
     Compatible with Windows PowerShell 5.1. ASCII only.
 
@@ -23,7 +25,9 @@ param(
     [switch]$Clean,
     [switch]$VsHuman,
     [switch]$NoBnetLog,
-    [switch]$OverwriteConfig
+    [switch]$OverwriteConfig,
+    # Optional override, e.g. "Visual Studio 17 2022" or "Visual Studio 18 2026"
+    [string]$Generator = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,20 +37,60 @@ function Write-Step([string]$Message) {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
-function Find-CMake {
-    $cmd = Get-Command cmake -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-
+# Finds the newest Visual Studio 2022 (17.x) or 2026 (18.x) install with the MSVC x86/x64 tools.
+# Returns @{ Path; Major; Generator } or $null.
+function Find-VisualStudio {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-    if (Test-Path $vswhere) {
-        $vsPath = & $vswhere -latest -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-        if ($vsPath) {
-            $candidate = Join-Path $vsPath "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
-            if (Test-Path $candidate) { return $candidate }
-        }
+    if (-not (Test-Path $vswhere)) { return $null }
+
+    $json = & $vswhere -all -prerelease -products * -version "[17.0,19.0)" `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json
+    if (-not $json) { return $null }
+    # PowerShell 5.1 emits a parsed JSON array as one object; enumerate it explicitly
+    $parsed = ($json | Out-String) | ConvertFrom-Json
+    $installs = @($parsed | ForEach-Object { $_ })
+    if ($installs.Count -eq 0) { return $null }
+
+    $best = $installs | Sort-Object { [version]$_.installationVersion } -Descending | Select-Object -First 1
+    $major = ([version]$best.installationVersion).Major
+    $generator = $null
+    if ($major -eq 18) { $generator = "Visual Studio 18 2026" }
+    elseif ($major -eq 17) { $generator = "Visual Studio 17 2022" }
+    if (-not $generator) { return $null }
+
+    return @{ Path = $best.installationPath; Major = $major; Generator = $generator; Name = $best.displayName }
+}
+
+# Returns $true if the given cmake.exe lists the generator in its --help output
+function Test-CMakeGenerator([string]$CMakePath, [string]$GeneratorName) {
+    $ErrorActionPreference = "Continue"
+    $help = & $CMakePath --help 2>$null | Out-String
+    return ($help -match [regex]::Escape($GeneratorName))
+}
+
+function Find-CMake([hashtable]$Vs, [string]$GeneratorName) {
+    $candidates = @()
+
+    # Prefer the CMake bundled with the selected Visual Studio (it always supports its own generator)
+    if ($Vs) {
+        $bundled = Join-Path $Vs.Path "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+        if (Test-Path $bundled) { $candidates += $bundled }
     }
 
-    throw "cmake.exe not found. Install CMake 3.24+ or Visual Studio 2022 with C++ CMake tools."
+    $cmd = Get-Command cmake -ErrorAction SilentlyContinue
+    if ($cmd) { $candidates += $cmd.Source }
+
+    $programFilesCMake = Join-Path $env:ProgramFiles "CMake\bin\cmake.exe"
+    if (Test-Path $programFilesCMake) { $candidates += $programFilesCMake }
+
+    foreach ($candidate in ($candidates | Select-Object -Unique)) {
+        if (Test-CMakeGenerator $candidate $GeneratorName) { return $candidate }
+        Write-Warning "Skipping $candidate (does not support generator '$GeneratorName')"
+    }
+
+    throw ("cmake.exe with generator '$GeneratorName' not found. " +
+           "In the Visual Studio Installer, add 'C++ CMake tools for Windows' to the 'Desktop development with C++' workload, " +
+           "or install CMake 4.2+ (VS 2026) / 3.24+ (VS 2022) from cmake.org.")
 }
 
 # Repository root = parent of this script's folder
@@ -58,7 +102,17 @@ if (-not (Test-Path (Join-Path $RepoRoot "CMakeLists.txt"))) {
 if (-not [System.IO.Path]::IsPathRooted($BuildDir)) { $BuildDir = Join-Path $RepoRoot $BuildDir }
 if (-not [System.IO.Path]::IsPathRooted($DistDir)) { $DistDir = Join-Path $RepoRoot $DistDir }
 
-$CMake = Find-CMake
+$Vs = Find-VisualStudio
+if ($Generator -eq "") {
+    if (-not $Vs) {
+        throw ("No Visual Studio 2022/2026 with MSVC x86/x64 tools found. In the Visual Studio Installer, " +
+               "select 'Desktop development with C++' (MSVC build tools, Windows SDK, C++ CMake tools for Windows).")
+    }
+    $Generator = $Vs.Generator
+}
+$CMake = Find-CMake $Vs $Generator
+if ($Vs) { Write-Host "VS:        $($Vs.Name) ($($Vs.Path))" }
+Write-Host "Generator: $Generator"
 Write-Host "CMake:     $CMake"
 Write-Host "Repo:      $RepoRoot"
 Write-Host "Build dir: $BuildDir"
@@ -75,8 +129,8 @@ if ($VsHuman) { $vsHumanValue = "ON" }
 $bnetLogValue = "ON"
 if ($NoBnetLog) { $bnetLogValue = "OFF" }
 
-Write-Step "Configuring (Visual Studio 17 2022, Win32, TOURNAMENT_BUILD=ON, VS_HUMAN=$vsHumanValue, BNET_LOG=$bnetLogValue)"
-& $CMake -S $RepoRoot -B $BuildDir -G "Visual Studio 17 2022" -A Win32 `
+Write-Step "Configuring ($Generator, Win32, TOURNAMENT_BUILD=ON, VS_HUMAN=$vsHumanValue, BNET_LOG=$bnetLogValue)"
+& $CMake -S $RepoRoot -B $BuildDir -G $Generator -A Win32 `
     "-DTOURNAMENT_BUILD=ON" `
     "-DVS_HUMAN=$vsHumanValue" `
     "-DBNET_LOG=$bnetLogValue"
