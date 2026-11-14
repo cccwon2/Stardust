@@ -73,7 +73,8 @@ Limitation: follow-up waypoint moves issued later by the pathing code (`MyUnitIm
 | `forced_random_opening` | `"OneGateCore"` | Opening used against a Random enemy instead of UCB1 (PvU picks among `ForgeFastExpand`, `TwoGateZealots`, `OneGateCore`). `OneGateCore` hands off cleanly to PvT `EarlyGameDefense` once Terran is confirmed. Empty string = UCB1. |
 | `early_observer_priority` | `true` | Staged request for the first observer (the producer adds robo + observatory at the same priority). See "First observer policy" below. `false` (or `pluto_pvt_snipe=false`) restores upstream detection. |
 | `observer_min_dragoons` | `2` | Completed dragoons required before a two-factory / mech / 3+ vulture observer request is raised to high priority (0-12). Below it the request stays at normal priority (below dragoon base production) instead of being dropped. Initial value only, not validated in real games. |
-| `natural_cannons` | `1` | Once our natural nexus is complete, guarantee this many cannons (0-2) in the natural mineral line, plus 1 in the main mineral line against `TwoFactory` / mech / 3+ vultures. |
+| `natural_cannons` | `1` | Conditional cannon placement requests (0-2) in the natural mineral line once our natural nexus is complete (not in `ForgeExpandGoons`, whose play handles the natural). |
+| `main_cannons` | `1` | Conditional cannon placement request (0-1) in the main mineral line against `TwoFactory` / `MidGameMech` / `MidGameBioMech` / 3+ vultures, independent of the natural, not during `AntiMarineRush`. If the key is absent: `1` when `natural_cannons > 0`, else `0` (old files with `natural_cannons: 0` keep all cannons off). |
 | `bio_attack_start_scale` | `0.7` | Multiplier in `shouldStartAttack` (moving -> attacking) vs. `MidGameBio` (0.1-2.0). |
 | `bio_attack_continue_scale` | `1.0` | Multiplier in `shouldContinueAttack` (attacking -> regrouping). `1.0` keeps upstream continue decisions. |
 | `bio_attack_resume_scale` | `0.7` | Multiplier in `shouldStopRegrouping` (regrouping -> attacking). |
@@ -124,6 +125,15 @@ Upstream behavior: set all three new keys to `1.0` (or `pluto_pvt_snipe=false`).
 `bio_aggression_scale(legacy)=X(start/resume only)` or `absent`.
 
 These values are starting points; static checks do not show fewer attack/retreat oscillations or a higher win rate.
+
+### Cannon placement requests
+
+Requests are conditional, not guaranteed: only the predefined `workerDefenseCannons` locations of
+`BuildingPlacement::baseStaticDefenseLocations` are used (there is no choke cannon helper in Stardust). Requests use
+`PRIORITY_NORMAL`, below dragoon base production; the producer adds the forge. Per base: the power pylon is requested
+first (unless already queued); completed cannons, cannons under construction and buildings already queued at a location
+count towards the target; locations occupied by another building are skipped. Invalid locations, an occupied pylon tile or
+too few free locations are logged once per base and reason.
 
 Recognizer changes (`PvTEnemyStrategyRecognizer.cpp`, only when `pluto_pvt_snipe` is on):
 

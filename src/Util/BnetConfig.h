@@ -23,7 +23,9 @@ namespace BnetConfig
         std::string forcedRandomOpening = "OneGateCore";    // PvU (random enemy) opening used instead of UCB1 (empty = use UCB1)
         bool earlyObserverPriority = true;      // Staged first-observer requests (urgent / elevated / preventive), see BnetPolicy
         int observerMinDragoons = 2;            // Completed dragoons before a two-factory / many-vulture observer gets high priority
-        int naturalCannons = 1;                 // Cannons to guarantee at the natural once it is taken (0-2)
+        int naturalCannons = 1;                 // Conditional cannon requests in the natural mineral line once it is taken (0-2)
+        int mainCannons = 1;                    // Conditional cannon requests in the main mineral line vs. vultures / mech (0-1);
+                                                // absent key -> 1 if natural_cannons > 0 else 0
         // Aggression multipliers vs. a recognized MidGameBio Terran (AttackBaseSquad), per decision state.
         // Effective values after the compatibility policy in BnetPolicy::resolveBioScales.
         double bioAttackStartScale = 0.7;       // shouldStartAttack (moving -> attacking)

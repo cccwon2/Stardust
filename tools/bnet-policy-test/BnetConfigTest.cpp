@@ -26,6 +26,13 @@ int main(){
   w("{\"bio_attack_resume_scale\": 9, \"observer_min_dragoons\": -3}");
   BnetConfig::initialize(); c=BnetConfig::get();
   C(c.bioAttackResumeScale==2.0 && c.observerMinDragoons==0);
+  C(c.mainCannons==1);
+  w("{\"natural_cannons\": 0}");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.naturalCannons==0 && c.mainCannons==0);
+  w("{\"natural_cannons\": 0, \"main_cannons\": 1}");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.naturalCannons==0 && c.mainCannons==1);
   printf("%s\n", BnetConfig::summary().c_str());
   printf("fails=%d\n",fails); return fails;
 }

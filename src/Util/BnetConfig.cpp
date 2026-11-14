@@ -15,6 +15,7 @@ namespace BnetConfig
     {
         Config config;
         bool fromFile = false;
+        bool mainCannonsPresent = false;
         std::string path;
 
         const char *candidatePaths[] = {
@@ -107,6 +108,7 @@ namespace BnetConfig
     {
         config = Config();
         fromFile = false;
+        mainCannonsPresent = false;
         path.clear();
 
         for (auto candidate : candidatePaths)
@@ -137,6 +139,7 @@ namespace BnetConfig
                 read(json, "early_observer_priority", config.earlyObserverPriority);
                 read(json, "observer_min_dragoons", config.observerMinDragoons);
                 read(json, "natural_cannons", config.naturalCannons);
+                mainCannonsPresent = readPresent(json, "main_cannons", config.mainCannons);
                 BnetPolicy::BioScaleKeys bioKeys;
                 bioKeys.hasLegacy = readPresent(json, "bio_aggression_scale", bioKeys.legacy);
                 bioKeys.hasStart = readPresent(json, "bio_attack_start_scale", bioKeys.start);
@@ -158,14 +161,18 @@ namespace BnetConfig
             {
                 // Parse error: fall back to defaults and keep looking
                 config = Config();
+                mainCannonsPresent = false;
             }
         }
+
+        config.mainCannons = BnetPolicy::resolveMainCannons(mainCannonsPresent, config.mainCannons, config.naturalCannons);
 
         // Clamp values to sane ranges
         config.stuckWorkerFrames = std::clamp(config.stuckWorkerFrames, 12, 1000);
         config.maxOrdersPerFrame = std::max(0, config.maxOrdersPerFrame);
         config.minCommandIntervalFrames = std::clamp(config.minCommandIntervalFrames, -1, 48);
         config.naturalCannons = std::clamp(config.naturalCannons, 0, 2);
+        config.mainCannons = std::clamp(config.mainCannons, 0, 1);
         config.observerMinDragoons = std::clamp(config.observerMinDragoons, 0, 12);
         config.bioAttackStartScale = std::clamp(config.bioAttackStartScale, 0.1, 2.0);
         config.bioAttackContinueScale = std::clamp(config.bioAttackContinueScale, 0.1, 2.0);
@@ -204,6 +211,7 @@ namespace BnetConfig
            << " early_observer_priority=" << config.earlyObserverPriority
            << " observer_min_dragoons=" << config.observerMinDragoons
            << " natural_cannons=" << config.naturalCannons
+           << " main_cannons=" << config.mainCannons << (mainCannonsPresent ? "" : "(derived)")
            << " bio_attack_start_scale=" << config.bioAttackStartScale
            << " bio_attack_continue_scale=" << config.bioAttackContinueScale
            << " bio_attack_resume_scale=" << config.bioAttackResumeScale

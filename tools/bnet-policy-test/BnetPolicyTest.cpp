@@ -236,6 +236,44 @@ namespace
         r = resolveBioScales(k);
         CHECK(near(r.start, 1.0) && near(r.cont, 1.0) && near(r.resume, 1.0));
     }
+
+    void testCannons()
+    {
+        using T = CannonTile;
+        {
+            T tiles[] = {T::Empty, T::Empty};
+            auto p = planCannons(tiles, 2, 1);
+            CHECK(p.existing == 0 && p.requestCount == 1 && p.requestIndices[0] == 0 && p.shortfall == 0);
+        }
+        {
+            // Completed or pending cannons count; nothing new is requested
+            T tiles[] = {T::CannonPending, T::Empty};
+            auto p = planCannons(tiles, 2, 1);
+            CHECK(p.existing == 1 && p.requestCount == 0 && p.shortfall == 0);
+        }
+        {
+            // Occupied first location: use the next one
+            T tiles[] = {T::Occupied, T::Empty};
+            auto p = planCannons(tiles, 2, 1);
+            CHECK(p.requestCount == 1 && p.requestIndices[0] == 1 && p.shortfall == 0);
+        }
+        {
+            // Not enough locations: shortfall reported, no request on occupied tiles
+            T tiles[] = {T::Occupied, T::Cannon};
+            auto p = planCannons(tiles, 2, 2);
+            CHECK(p.existing == 1 && p.requestCount == 0 && p.shortfall == 1);
+        }
+        {
+            T tiles[] = {T::Empty};
+            auto p = planCannons(tiles, 1, 0);
+            CHECK(p.requestCount == 0 && p.shortfall == 0);
+        }
+
+        CHECK(resolveMainCannons(false, 1, 1) == 1);
+        CHECK(resolveMainCannons(false, 1, 0) == 0);   // old natural_cannons=0 still disables the main cannon
+        CHECK(resolveMainCannons(true, 1, 0) == 1);    // explicit main_cannons wins
+        CHECK(resolveMainCannons(true, 0, 2) == 0);
+    }
 }
 
 int main()
@@ -244,6 +282,7 @@ int main()
     testRecoveryCooldown();
     testDetection();
     testBioScales();
+    testCannons();
 
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

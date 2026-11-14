@@ -189,4 +189,54 @@ namespace BnetPolicy
                 keys.hasContinue ? keys.cont : defaultBioContinueScale,
                 keys.hasResume ? keys.resume : legacyOrResume};
     }
+    // ---------------------------------------------------------------------------------------------
+    // Mineral line cannon placement requests (PvT::handlePlutoCannons)
+    // ---------------------------------------------------------------------------------------------
+
+    enum class CannonTile
+    {
+        Empty,          // Free: a cannon may be requested here
+        Cannon,         // Our completed cannon
+        CannonPending,  // Our cannon under construction, or a building already queued in the builder at this tile
+        Occupied        // Another of our buildings occupies the tile (cannot be used)
+    };
+
+    struct CannonPlan
+    {
+        int existing = 0;           // Completed + under construction / queued cannons counted towards the target
+        int requestIndices[8] = {}; // Indices of Empty tiles to request this frame
+        int requestCount = 0;
+        int shortfall = 0;          // Target that cannot be met with the available locations
+    };
+
+    // Plans conditional cannon requests for up to `target` cannons over the predefined locations.
+    // Existing and pending cannons count first; occupied tiles are skipped; the remainder is requested on empty tiles.
+    inline CannonPlan planCannons(const CannonTile *tiles, int tileCount, int target)
+    {
+        CannonPlan plan;
+        if (target <= 0) return plan;
+
+        for (int i = 0; i < tileCount; i++)
+        {
+            if (tiles[i] == CannonTile::Cannon || tiles[i] == CannonTile::CannonPending) plan.existing++;
+        }
+
+        int needed = target - plan.existing;
+        for (int i = 0; i < tileCount && needed > 0 && plan.requestCount < 8; i++)
+        {
+            if (tiles[i] != CannonTile::Empty) continue;
+            plan.requestIndices[plan.requestCount++] = i;
+            needed--;
+        }
+
+        plan.shortfall = needed > 0 ? needed : 0;
+        return plan;
+    }
+
+    // main_cannons compatibility: absent -> 1 if natural_cannons > 0 else 0 (natural_cannons=0 used to disable all cannons)
+    inline int resolveMainCannons(bool mainKeyPresent, int mainCannons, int naturalCannons)
+    {
+        if (mainKeyPresent) return mainCannons;
+        return naturalCannons > 0 ? 1 : 0;
+    }
 }

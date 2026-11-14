@@ -81,6 +81,9 @@ private:
     // Pluto snipe: current first-observer request stage (for logging stage changes)
     BnetPolicy::DetectionStage plutoDetectionStage = BnetPolicy::DetectionStage::Upstream;
 
+    // Pluto snipe: cannon placement issues already logged (base tile + reason), to avoid repeating them every frame
+    std::set<std::string> plutoCannonIssuesLogged;
+
     TerranStrategy recognizeEnemyStrategy();
 
     OurStrategy chooseOurStrategy(TerranStrategy newEnemyStrategy, std::vector<std::shared_ptr<Play>> &plays);
