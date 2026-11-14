@@ -3,9 +3,9 @@ AI for StarCraft: Brood War
 
 ## Battle.net / Pluto fork
 
-이 포크는 StarCraft: Remastered Battle.net의 지연 환경에서 채취 안정성을 개선하고 Pluto 스타일 테란에 대응하기 위한 프로토스 봇입니다. 작업 브랜치는 `bnet-pluto`입니다. 원작은 [bmnielsen/Stardust](https://github.com/bmnielsen/Stardust)입니다.
+이 포크는 StarCraft: Remastered Battle.net의 지연 환경에서 채취 안정성과 명령량(APM)을 개선하고, Pluto 스타일 테란과 사람 상대의 초반 러시에 대응하기 위한 프로토스 봇입니다. 작업 브랜치는 `bnet-pluto`이며 검토된 변경은 `main`에 병합합니다. 원작은 [bmnielsen/Stardust](https://github.com/bmnielsen/Stardust)입니다.
 
-문서 기준: 2026-11-15 KST, 코드 커밋 [`df69d84`](../../commit/df69d8483c7c4de0c2fe6d0eadf0168837e311b8). 구현 상세·전체 설정·제한 사항은 [Battle.net 가이드](docs/BNET.md), 기본값은 [JSON 템플릿](config/stardust_bnet.json)을 참고하세요.
+문서 기준: 2026-11-16 KST, 코드 커밋 [`c9fe8ad`](../../commit/c9fe8add) (PR #8까지). 구현 상세·전체 설정·제한 사항은 [Battle.net 가이드](docs/BNET.md), 기본값은 [JSON 템플릿](config/stardust_bnet.json)을 참고하세요.
 
 ### 구현 단계와 최신 변경
 
@@ -25,6 +25,13 @@ AI for StarCraft: Brood War
 | `ad9eb12` | MidGameBio 공격 시작·유지·재개 배율을 각각 분리. 기본값 0.7 / 1.0 / 0.7; 기존 bio_aggression_scale은 시작·재개에만 적용 |
 | `6d58e8e` | 본진·앞마당 미네랄 라인 캐논 요청 분리. 본진은 앞마당 완성과 무관하게 조건부 요청. 완성·건설 중·예약 캐논을 계산하고 배치 장애 기록 |
 | `df69d84` | 자원 명령 가드·정지 복구·바이오닉 교전 전환 카운터, 탐지 단계·첫 옵저버·캐논 배치 이벤트 추가. APM 필드의 의미와 설정 적용 시점 명확화 |
+| `659dc1d` (PR #4) | PvT 메카닉 대응: 병력 대비 확장·업그레이드 게이트, 질럿 비율 제한, 공격 배율. 비일꾼 유닛 반복 이동 가드와 자체 명령 카운터(`orders_per_min`) |
+| `06c3460` (PR #5) | 빌드 스크립트 Visual Studio 2026(`Visual Studio 18 2026`) 지원, 설치된 최신 VS 자동 선택 |
+| `6e6d881` (PR #6) | 게임 시작 시 빌드 ID(`브랜치@커밋`)와 설정 파일 경로 표시(`print_build_info`), `[START]`에 `build=` 기록 |
+| `5805b1b` (PR #7) | Move·Stop 과다 감소(경로 웨이포인트 유지, 군대·옵저버 재전송 간격, 스테이시스·언로드 반복 방지, 갇힌 일꾼 대기 증가). 메카닉·벌처 위협 시 앞마당 캐논 2기, 세 번째 이후 확장마다 캐논 1기 |
+| `c9fe8ad` (PR #8) | 저그전 오프닝 고정(`forced_pvz_opening`), 저글링 올인 조기 확정, 선풀 시 포지 더블 입구 캐논 3기·최소 질럿, 올인 중 프로브 생산 제한 |
+
+종족별 적용 범위: 채취 안정화와 이동 명령 감소(PR #7)는 상대 종족과 무관하게 지연이 4프레임을 넘는 환경(배틀넷)에서 동작합니다. 캐논 보강과 메카닉 대응은 테란전, 올인 대응은 저그전에만 적용됩니다. 프로토스전은 원작 로직을 사용합니다.
 
 ### Windows 빌드와 배포
 
@@ -44,11 +51,13 @@ powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 - 기존 운영 설정은 보존하며 `-OverwriteConfig`를 지정했을 때만 덮어씁니다. 기본값 참조 파일은 매번 갱신합니다.
 - 추가 옵션: `-Clean`, `-VsHuman`, `-NoBnetLog`, `-BuildDir`, `-DistDir`
 
-빌드 후 `dist/bwapi-data` 내용을 사용 중인 StarCraft의 `bwapi-data`에 배치합니다. 이 스크립트는 DLL·설정 빌드/배포용이며 Remastered용 BWAPI 실행 환경이나 브리지 설치를 대신하지 않습니다.
+빌드 후 `dist/bwapi-data` 내용을 사용 중인 StarCraft의 `bwapi-data`에 배치합니다. 새 설정 키가 추가된 버전으로 갱신할 때는 `-OverwriteConfig`로 운영 설정을 새 기본값으로 바꾸거나 `stardust_bnet.default.json`과 비교해 옮기세요. 기존 파일에 남아 있는 값(예: 예전 `move_resend_tolerance_px: 24`)은 새 기본값보다 우선합니다. 이 스크립트는 DLL·설정 빌드/배포용이며 Remastered용 BWAPI 실행 환경이나 브리지 설치를 대신하지 않습니다.
 
 ### 주요 설정
 
-설정 검색 순서: `bwapi-data/AI/stardust_bnet.json` → `bwapi-data/read/stardust_bnet.json` → `bwapi-data/write/stardust_bnet.json`. 파일이 없으면 안전한 기본값을 사용합니다.
+설정 검색 순서: `bwapi-data/AI/stardust_bnet.json` → `bwapi-data/read/stardust_bnet.json` → `bwapi-data/write/stardust_bnet.json`. 경로는 게임 프로세스의 작업 폴더 기준이며, 파일이 없으면 안전한 기본값을 사용합니다.
+
+설정 파일을 어디에 둘지 모르겠다면 `stardust_bnet.log`가 생기는 `bwapi-data/write/` 폴더에 넣으면 됩니다(`AI` 폴더를 새로 만들 필요 없음). `[START]` 줄의 `config=` 값이 `defaults`이면 파일을 찾지 못한 것이고, 경로가 찍히면 그 파일을 읽은 것입니다.
 
 설정은 경기 시작 시 한 번 읽습니다. 재컴파일은 필요 없지만 경기 중 수정은 다음 경기부터 적용됩니다. 핫 리로드는 지원하지 않습니다.
 
@@ -84,7 +93,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 | `bio_attack_start_scale` | `0.7` | MidGameBio 상대 공격 시작 배율 |
 | `bio_attack_continue_scale` | `1.0` | 공격 유지 배율; 기본값은 원작 유지 판단 |
 | `bio_attack_resume_scale` | `0.7` | 재집결 후 공격 재개 배율 |
-| `print_build_info` | `true` | 게임 시작 시 빌드 ID(브랜치@커밋)와 설정 파일 경로를 내 화면에만 표시 (printf + 처음 30초 화면 그리기) |
+| `print_build_info` | `true` | 게임 시작 시 빌드 ID(브랜치@커밋)와 설정 파일 경로를 내 화면에만 표시 (printf + 처음 30초 화면 그리기). 배틀넷 브리지에서는 화면에 보이지 않고 브리지 로그에 기록될 수 있음 |
 | `bnet_log` | `true` | 경량 경기 로그 활성화 |
 
 순정 PvT UCB1 후보는 이미 `EarlyGameDefense` 하나입니다. 오프닝 고정의 주요 차이는 상대 이름별 이력과 무관한 명시적 선택 및 랜덤 상대의 PvU 탐색 우회입니다. 캐논은 배치 가능 위치·전략 조건·생산 우선순위에 따른 요청이며 건설 보장이 아닙니다.
@@ -95,15 +104,18 @@ powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 
 로그는 `bwapi-data/write/stardust_bnet.log`에 누적됩니다. CMake `BNET_LOG=ON`이면 `TOURNAMENT_BUILD=ON`에서도 동작하며, `-NoBnetLog`는 로그를 빌드에서 제외합니다.
 
-- `[START]`: 맵, 상대, 지연 프레임, 실제 적용 설정
+- `[START]`: 빌드 ID, 맵, 상대, 지연 프레임, 설정 파일 경로(`config=`), 실제 적용 설정
 - `[ENEMY]` / `[OURS]`: 적·아군 전략 전환
-- `[EVENT]`: 탐지 요청 단계 전환, 첫 옵저버 완성, 캐논 배치 문제 등
-- `[APM]`: 2880프레임마다(게임 시간 약 2분) BWAPI APM과 누적 카운터
+- `[EVENT]`: 탐지 요청 단계 전환, 첫 옵저버 완성, 캐논 계획(`cannon_plan`)·배치 문제(`cannon_issue`), 메카닉 확장 게이트, 저그 올인 확정(`pvz_allin_detect`)과 저그전 수비 목표(`pvz_defense`) 등
+- `[APM]`: 2880프레임마다(게임 시간 약 2분) 자체 명령 수(`orders_per_min`, 유닛 종류별 누적), 생략된 이동(`moves_skipped`, `grid_holds`), 반복 명령 생략(`orders_repeat_skipped`), 갇힌 일꾼 대기(`unstick_backoffs`), 지연·명령 간격(`latency_max`, `cmd_interval`)과 기타 누적 카운터
 - `[END]`: 승패, 최종 전략, 종료 APM 및 누적 카운터
 
-`bwapi_apm`은 BWAPI의 감쇠된 최근 APM이며 경기 전체 평균이나 자체 명령 횟수가 아닙니다. `bwapi_apm_at_end`는 종료 시 값, `bwapi_apm_max_sampled`는 주기 표본 중 최대값으로 표본 사이 순간 피크는 놓칠 수 있습니다. `res_*`는 단순 채취 일꾼의 가드 대상 자원 명령만 집계하고, 복구 명령은 `stuck_*`로 별도 집계합니다. `bio_to_attack` / `bio_to_regroup`는 MidGameBio 배율이 적용되는 동안의 실제 상태 전환 횟수입니다.
+명령량은 `orders_per_min`으로 확인하세요. `bwapi_apm`은 Remastered에서 0으로 기록되며, 원래 BWAPI의 감쇠된 최근 APM으로 경기 전체 평균이나 자체 명령 횟수가 아닙니다. `bwapi_apm_at_end`는 종료 시 값, `bwapi_apm_max_sampled`는 주기 표본 중 최대값으로 표본 사이 순간 피크는 놓칠 수 있습니다. `res_*`는 단순 채취 일꾼의 가드 대상 자원 명령만 집계하고, 복구 명령은 `stuck_*`로 별도 집계합니다. `bio_to_attack` / `bio_to_regroup`는 MidGameBio 배율이 적용되는 동안의 실제 상태 전환 횟수입니다.
 
-코드·문서·빌드 스크립트가 존재하는 것과 실행 검증은 구분합니다. 이 README 갱신 과정에서는 Windows Win32 Release 빌드, 단위 테스트 실행, Remastered Battle.net 실전 대전을 수행하지 않았습니다. 저장소에는 [독립 정책 테스트](tools/bnet-policy-test)가 있으며, 여기서 테스트 통과·실전 안정성·승률 향상을 보증하지 않습니다. 기본 전술 수치는 실전 조정의 출발점입니다. 하이템플러 스톰 마이크로는 추가되지 않았고, 경로 추적의 후속 waypoint 이동은 채취 이동 가드 대상이 아닙니다.
+코드·문서·빌드 스크립트가 존재하는 것과 실행 검증은 구분합니다.
+
+- 확인됨: [독립 정책 테스트](tools/bnet-policy-test) 154개 검사와 설정 로더 테스트 통과(Linux g++), 변경 소스의 g++ 문법 검사. 사용자 Windows 환경에서 `bnet-pluto@9fabc694` 빌드가 배틀넷 저그전에서 실행되어 새 기본 설정으로 동작하고(`config=defaults`) 2분 시점 `orders_per_min`이 약 100으로 기록됨.
+- 미확인: PR #8(저그전 올인 대응)의 Windows 빌드와 실전 효과, 중후반 대규모 교전의 명령량, 이동 명령 생략이 드라군 컨트롤에 주는 영향. 승률 향상은 보증하지 않습니다. 기본 전술 수치는 실전 조정의 출발점입니다. 하이템플러 스톰 마이크로는 추가되지 않았고, 경로 추적의 후속 waypoint 이동은 채취 이동 가드 대상이 아닙니다.
 
 ## About
 Stardust is written in C++ and uses [BWAPI](https://github.com/bwapi/bwapi) to play 1v1 Melee games of StarCraft: Brood War. Stardust plays as the Protoss race.
