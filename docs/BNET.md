@@ -173,7 +173,7 @@ Not changed: the arbiter condition (3 nexuses, 20+ army), carrier switch (disabl
 
 ## Phase 3: Build script and summary log
 
-- `scripts/build-bnet.ps1`: configures with `-G "Visual Studio 17 2022" -A Win32 -DTOURNAMENT_BUILD=ON` (which also skips the `windbg` target), builds only the `Stardust` target in Release, and copies `Stardust.dll` plus `config/stardust_bnet.json` to `dist/bwapi-data/AI/`. An existing `dist/.../stardust_bnet.json` is kept unless `-OverwriteConfig`; the defaults are always written to `stardust_bnet.default.json`. Options: `-Clean`, `-VsHuman`, `-NoBnetLog`, `-BuildDir`, `-DistDir`.
+- `scripts/build-bnet.ps1`: configures with the generator of the newest Visual Studio 2022/2026 install that has the MSVC x86/x64 tools (`Visual Studio 17 2022` or `Visual Studio 18 2026`, override with `-Generator`; the CMake bundled with that Visual Studio is preferred and must list the generator), `-A Win32 -DTOURNAMENT_BUILD=ON` (which also skips the `windbg` target), builds only the `Stardust` target in Release, and copies `Stardust.dll` plus `config/stardust_bnet.json` to `dist/bwapi-data/AI/`. An existing `dist/.../stardust_bnet.json` is kept unless `-OverwriteConfig`; the defaults are always written to `stardust_bnet.default.json`. Options: `-Clean` (required when an existing build directory was configured with another generator), `-VsHuman`, `-NoBnetLog`, `-BuildDir`, `-DistDir`, `-Generator`.
 - CMake option `BNET_LOG` (default `ON`) compiles the summary log in, independent of `LOGGING_ENABLED` (which `TOURNAMENT_BUILD` turns off). Runtime switch: `bnet_log`.
 - Log file `bwapi-data/write/stardust_bnet.log`, appended, one line per event, flushed immediately:
 
