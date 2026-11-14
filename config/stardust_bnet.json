@@ -39,6 +39,15 @@
   "spell_resend_interval_frames": 24,
   "unstick_backoff_max_frames": 192,
 
+  "forced_pvz_opening": "FFEDragoons",
+  "pvz_antiallin_fix": true,
+  "pvz_allin_base_lings": 6,
+  "pvz_allin_seen_lings": 12,
+  "pvz_pool_first_cannons": 3,
+  "pvz_pool_first_zealots": 2,
+  "pvz_allin_zealots": 4,
+  "pvz_allin_probe_cap": 18,
+
   "print_build_info": true,
   "bnet_log": true
 }

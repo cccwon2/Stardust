@@ -75,6 +75,12 @@ powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 | `grid_waypoint_hold` / `grid_waypoint_refresh_px` | `true` / `64` | 경로 웨이포인트를 타일마다 바꾸지 않고 가까워졌을 때만 갱신 |
 | `spell_resend_interval_frames` | `24` | 같은 스테이시스·언로드 명령 재전송 간격 |
 | `unstick_backoff_max_frames` | `192` | 갇힌 일꾼의 Stop·Move 반복 대기 상한 |
+| `forced_pvz_opening` | `FFEDragoons` | 저그전 오프닝 고정(`FFEDragoons` / `SairSpeedlot` / `EarlyGameDefense`); 빈 값은 UCB1 |
+| `pvz_antiallin_fix` | `true` | 저그전 저글링 올인 대응 스위치 |
+| `pvz_allin_base_lings` / `pvz_allin_seen_lings` | `6` / `12` | 본진·앞마당에 보인 저글링 / 살아 있는 저글링 수로 올인 조기 확정 |
+| `pvz_pool_first_cannons` | `3` | 선풀 판별 시 포지 더블 입구 캐논 목표 |
+| `pvz_pool_first_zealots` / `pvz_allin_zealots` | `2` / `4` | 선풀 / 올인 시 최소 질럿 수(올인 시 프로브보다 먼저) |
+| `pvz_allin_probe_cap` | `18` | 올인 중 이 수를 넘는 프로브 생산을 질럿 뒤로 미룸; 0은 끔 |
 | `bio_attack_start_scale` | `0.7` | MidGameBio 상대 공격 시작 배율 |
 | `bio_attack_continue_scale` | `1.0` | 공격 유지 배율; 기본값은 원작 유지 판단 |
 | `bio_attack_resume_scale` | `0.7` | 재집결 후 공격 재개 배율 |
