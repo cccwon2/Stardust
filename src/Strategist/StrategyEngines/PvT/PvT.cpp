@@ -9,6 +9,7 @@
 #include "Opponent.h"
 #include "Strategist.h"
 #include "BnetConfig.h"
+#include "BnetPolicy.h"
 
 #include "Plays/Macro/SaturateBases.h"
 #include "Plays/MainArmy/DefendMyMain.h"
@@ -766,36 +767,42 @@ void PvT::handleDetection(std::vector<std::shared_ptr<Play>> &plays, std::map<in
         return;
     }
 
-    // Pluto snipe: get robo -> observatory -> observer early instead of waiting for two bases.
-    // The producer adds the robotics facility and observatory prerequisites automatically.
-    auto &bnetConfig = BnetConfig::get();
-    if (bnetConfig.plutoPvtSnipe && bnetConfig.earlyObserverPriority)
+    // Pluto snipe: first-observer policy, see BnetPolicy::decideDetection.
+    // Only governs the first observer; once one exists, or when no early condition applies, the upstream policy below runs.
+    // The producer adds the robotics facility and observatory prerequisites at the same priority.
     {
-        // Immediately and at high priority when mines or vulture/mech play are seen
-        if (Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Vulture_Spider_Mine) ||
-            Players::hasResearched(BWAPI::Broodwar->enemy(), BWAPI::TechTypes::Spider_Mines) ||
-            enemyStrategy == TerranStrategy::TwoFactory ||
-            enemyStrategy == TerranStrategy::MidGameMech ||
-            enemyStrategy == TerranStrategy::MidGameBioMech ||
-            Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Vulture) ||
-            Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Machine_Shop))
+        auto &bnetConfig = BnetConfig::get();
+        BnetPolicy::DetectionInput input{
+                bnetConfig.plutoPvtSnipe && bnetConfig.earlyObserverPriority,
+                Units::countCompleted(BWAPI::UnitTypes::Protoss_Observer),
+                Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Vulture_Spider_Mine) ||
+                Players::hasResearched(BWAPI::Broodwar->enemy(), BWAPI::TechTypes::Spider_Mines),
+                enemyStrategy == TerranStrategy::TwoFactory ||
+                enemyStrategy == TerranStrategy::MidGameMech ||
+                enemyStrategy == TerranStrategy::MidGameBioMech,
+                Units::countEnemy(BWAPI::UnitTypes::Terran_Vulture),
+                Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Vulture) ||
+                Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Machine_Shop),
+                ourStrategy == OurStrategy::AntiMarineRush,
+                currentFrame > 6500 ||
+                Players::upgradeLevel(BWAPI::Broodwar->self(), BWAPI::UpgradeTypes::Singularity_Charge) > 0 ||
+                BWAPI::Broodwar->self()->isUpgrading(BWAPI::UpgradeTypes::Singularity_Charge),
+                Units::countCompleted(BWAPI::UnitTypes::Protoss_Dragoon),
+                bnetConfig.observerMinDragoons};
+
+        auto stage = BnetPolicy::decideDetection(input);
+        if (stage != plutoDetectionStage)
         {
-            buildObserver(PRIORITY_SPECIALTEAMS);
-            return;
+            Log::Get() << "Pluto detection stage: " << BnetPolicy::detectionStageName(plutoDetectionStage)
+                       << " -> " << BnetPolicy::detectionStageName(stage);
+            plutoDetectionStage = stage;
         }
 
-        // Don't divert gas from goons while we are holding an early rush
-        if (ourStrategy == OurStrategy::AntiMarineRush) return;
-
-        // Otherwise get the first observers after dragoon range has started, at normal priority
-        if (currentFrame > 6500 || Players::upgradeLevel(BWAPI::Broodwar->self(), BWAPI::UpgradeTypes::Singularity_Charge) > 0 ||
-            BWAPI::Broodwar->self()->isUpgrading(BWAPI::UpgradeTypes::Singularity_Charge))
+        if (stage != BnetPolicy::DetectionStage::Upstream)
         {
-            buildObserver(PRIORITY_NORMAL);
+            buildObserver(BnetPolicy::detectionStageIsHighPriority(stage) ? PRIORITY_SPECIALTEAMS : PRIORITY_NORMAL);
             return;
         }
-
-        return;
     }
 
     // In all other cases, wait until we are on two bases

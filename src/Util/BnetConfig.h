@@ -21,7 +21,8 @@ namespace BnetConfig
         bool plutoPvtSnipe = true;              // Master switch for the PvT changes below
         std::string forcedPvtOpening = "EarlyGameDefense";  // PvT opening name used instead of UCB1 (empty = use UCB1)
         std::string forcedRandomOpening = "OneGateCore";    // PvU (random enemy) opening used instead of UCB1 (empty = use UCB1)
-        bool earlyObserverPriority = true;      // Robo -> observatory -> observer early, without waiting for two bases
+        bool earlyObserverPriority = true;      // Staged first-observer requests (urgent / elevated / preventive), see BnetPolicy
+        int observerMinDragoons = 2;            // Completed dragoons before a two-factory / many-vulture observer gets high priority
         int naturalCannons = 1;                 // Cannons to guarantee at the natural once it is taken (0-2)
         double bioAggressionScale = 0.7;        // Multiplier applied to attack aggression vs. MidGameBio (lower = more conservative)
 

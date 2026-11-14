@@ -71,9 +71,27 @@ Limitation: follow-up waypoint moves issued later by the pathing code (`MyUnitIm
 | `pluto_pvt_snipe` | `true` | Master switch for every Phase 2 change. `false` restores upstream PvT behavior. |
 | `forced_pvt_opening` | `"EarlyGameDefense"` | PvT opening used instead of UCB1. Valid: `EarlyGameDefense` (1-gate core dragoon, then reacts to scouting), `FastExpansion`. Empty string = UCB1. Note: upstream PvT UCB1 only has `EarlyGameDefense` as a candidate, so this mainly makes the choice explicit and independent of opponent name history. |
 | `forced_random_opening` | `"OneGateCore"` | Opening used against a Random enemy instead of UCB1 (PvU picks among `ForgeFastExpand`, `TwoGateZealots`, `OneGateCore`). `OneGateCore` hands off cleanly to PvT `EarlyGameDefense` once Terran is confirmed. Empty string = UCB1. |
-| `early_observer_priority` | `true` | Observer (the producer adds robo + observatory) is requested at `PRIORITY_SPECIALTEAMS` as soon as a vulture, machine shop, spider mine / mine research, or `TwoFactory` / mech strategy is seen, and otherwise at normal priority once dragoon range starts or after frame 6500, instead of upstream's "two nexuses or frame 14000". Not during `AntiMarineRush`. |
+| `early_observer_priority` | `true` | Staged request for the first observer (the producer adds robo + observatory at the same priority). See "First observer policy" below. `false` (or `pluto_pvt_snipe=false`) restores upstream detection. |
+| `observer_min_dragoons` | `2` | Completed dragoons required before a two-factory / mech / 3+ vulture observer request is raised to high priority (0-12). Below it the request stays at normal priority (below dragoon base production) instead of being dropped. Initial value only, not validated in real games. |
 | `natural_cannons` | `1` | Once our natural nexus is complete, guarantee this many cannons (0-2) in the natural mineral line, plus 1 in the main mineral line against `TwoFactory` / mech / 3+ vultures. |
 | `bio_aggression_scale` | `0.7` | Multiplies attack aggression in `AttackBaseSquad` (start and continue attack) when the enemy is recognized as `MidGameBio`. Lower = more regrouping, fewer trickle attacks (0.1-2.0). |
+
+### First observer policy
+
+Only the first observer is governed (no observer completed; upstream already returns while one is in production and when
+two observers are with the main army). Once one exists, or when no row below applies, the upstream policy runs unchanged
+(two nexuses, mine -> high priority, vulture/tank after frame 10000, frame 14000).
+
+| Stage | Condition | Priority |
+| --- | --- | --- |
+| `urgent` | Spider mine seen or Spider Mines researched | `PRIORITY_SPECIALTEAMS`, also during `AntiMarineRush`, regardless of dragoon count |
+| `elevated` | `TwoFactory` / `MidGameMech` / `MidGameBioMech` or 3+ vultures, and dragoons >= `observer_min_dragoons` | `PRIORITY_SPECIALTEAMS` |
+| `elevated_waiting_dragoons` | Same, fewer dragoons | `PRIORITY_NORMAL` (below `PRIORITY_MAINARMYBASEPRODUCTION`) |
+| `preventive` | A vulture or machine shop seen, frame > 6500, or dragoon range started | `PRIORITY_NORMAL` |
+| `upstream` | Nothing above, `AntiMarineRush` without mines, or feature off | Upstream policy |
+
+Mines are cloaked, so the main army also requests detection reactively through `updateDetectionNeeds()` (unchanged).
+Exactly one observer goal is added per frame; production goals are rebuilt every frame, so nothing accumulates.
 
 Recognizer changes (`PvTEnemyStrategyRecognizer.cpp`, only when `pluto_pvt_snipe` is on):
 

@@ -81,4 +81,71 @@ namespace BnetPolicy
         BudgetExhausted,    // max_orders_per_frame reached this frame; retry soon
         Rejected            // BWAPI rejected the command, an order was already issued this frame, or the target is gone
     };
+    // ---------------------------------------------------------------------------------------------
+    // PvT first-observer policy (early_observer_priority)
+    // ---------------------------------------------------------------------------------------------
+
+    enum class DetectionStage
+    {
+        Upstream,           // No early-detection condition (or feature off / first observer already out): upstream policy decides
+        Preventive,         // Single vulture / machine shop / timing: request at normal priority
+        ElevatedWaiting,    // Two-factory or many vultures, but fewer dragoons than observer_min_dragoons: normal priority
+        Elevated,           // Two-factory or many vultures with enough dragoons: high priority
+        Urgent              // Spider mine seen or researched: high priority regardless of dragoons or rush defense
+    };
+
+    inline const char *detectionStageName(DetectionStage stage)
+    {
+        switch (stage)
+        {
+            case DetectionStage::Upstream: return "upstream";
+            case DetectionStage::Preventive: return "preventive";
+            case DetectionStage::ElevatedWaiting: return "elevated_waiting_dragoons";
+            case DetectionStage::Elevated: return "elevated";
+            case DetectionStage::Urgent: return "urgent";
+        }
+        return "unknown";
+    }
+
+    struct DetectionInput
+    {
+        bool enabled;               // pluto_pvt_snipe && early_observer_priority
+        int completedObservers;     // Callers already return early while an observer is in production
+        bool mineSeenOrResearched;
+        bool twoFactoryOrMech;      // Enemy strategy TwoFactory / MidGameMech / MidGameBioMech
+        int enemyVultures;
+        bool vultureOrMachineShopSeen;
+        bool antiMarineRush;        // Our strategy is AntiMarineRush
+        bool timingReached;         // Frame > 6500 or dragoon range started
+        int completedDragoons;
+        int minDragoons;            // observer_min_dragoons
+    };
+
+    // Decides how the first observer is requested. Once any observer exists (or no condition applies), returns Upstream so
+    // the unchanged upstream policy handles additional observers and replacement after losses at its own priorities.
+    inline DetectionStage decideDetection(const DetectionInput &in)
+    {
+        if (!in.enabled) return DetectionStage::Upstream;
+        if (in.completedObservers > 0) return DetectionStage::Upstream;
+
+        // Real mine threat: first detection is urgent even while holding a marine rush (mines kill goons and probes outright)
+        if (in.mineSeenOrResearched) return DetectionStage::Urgent;
+
+        // While holding a marine rush, weaker mech signs never divert gas / robo investment from dragoons
+        if (in.antiMarineRush) return DetectionStage::Upstream;
+
+        if (in.twoFactoryOrMech || in.enemyVultures >= 3)
+        {
+            return in.completedDragoons >= in.minDragoons ? DetectionStage::Elevated : DetectionStage::ElevatedWaiting;
+        }
+
+        if (in.vultureOrMachineShopSeen || in.timingReached) return DetectionStage::Preventive;
+
+        return DetectionStage::Upstream;
+    }
+
+    inline bool detectionStageIsHighPriority(DetectionStage stage)
+    {
+        return stage == DetectionStage::Urgent || stage == DetectionStage::Elevated;
+    }
 }

@@ -117,6 +117,7 @@ namespace BnetConfig
                 read(json, "forced_pvt_opening", config.forcedPvtOpening);
                 read(json, "forced_random_opening", config.forcedRandomOpening);
                 read(json, "early_observer_priority", config.earlyObserverPriority);
+                read(json, "observer_min_dragoons", config.observerMinDragoons);
                 read(json, "natural_cannons", config.naturalCannons);
                 read(json, "bio_aggression_scale", config.bioAggressionScale);
                 read(json, "bnet_log", config.bnetLog);
@@ -137,6 +138,7 @@ namespace BnetConfig
         config.maxOrdersPerFrame = std::max(0, config.maxOrdersPerFrame);
         config.minCommandIntervalFrames = std::clamp(config.minCommandIntervalFrames, -1, 48);
         config.naturalCannons = std::clamp(config.naturalCannons, 0, 2);
+        config.observerMinDragoons = std::clamp(config.observerMinDragoons, 0, 12);
         config.bioAggressionScale = std::clamp(config.bioAggressionScale, 0.1, 2.0);
     }
 
@@ -170,6 +172,7 @@ namespace BnetConfig
            << " forced_pvt_opening=" << (config.forcedPvtOpening.empty() ? "UCB1" : config.forcedPvtOpening)
            << " forced_random_opening=" << (config.forcedRandomOpening.empty() ? "UCB1" : config.forcedRandomOpening)
            << " early_observer_priority=" << config.earlyObserverPriority
+           << " observer_min_dragoons=" << config.observerMinDragoons
            << " natural_cannons=" << config.naturalCannons
            << " bio_aggression_scale=" << config.bioAggressionScale
            << " bnet_log=" << config.bnetLog;

@@ -122,12 +122,88 @@ namespace
         CHECK(!recoveryAllowed(stored, deferredAt + latency + 1, cooldown));
         CHECK(recoveryAllowed(stored, deferredAt + latency + 2, cooldown));
     }
+
+    DetectionInput detection()
+    {
+        // Baseline: feature on, no observer, nothing seen, not holding a rush, early, 0 dragoons, threshold 2
+        return DetectionInput{true, 0, false, false, 0, false, false, false, 0, 2};
+    }
+
+    void testDetection()
+    {
+        // Nothing seen: upstream policy (reachable)
+        CHECK(decideDetection(detection()) == DetectionStage::Upstream);
+
+        // Single vulture or machine shop only: preventive (normal priority), not urgent
+        auto d = detection();
+        d.vultureOrMachineShopSeen = true;
+        d.enemyVultures = 1;
+        CHECK(decideDetection(d) == DetectionStage::Preventive);
+        CHECK(!detectionStageIsHighPriority(decideDetection(d)));
+
+        // Real mine: urgent (high priority), different from the single-vulture case
+        d.mineSeenOrResearched = true;
+        CHECK(decideDetection(d) == DetectionStage::Urgent);
+        CHECK(detectionStageIsHighPriority(decideDetection(d)));
+
+        // Mine while holding a marine rush: still urgent (never forbidden); dragoon minimum does not delay it
+        d.antiMarineRush = true;
+        d.completedDragoons = 0;
+        CHECK(decideDetection(d) == DetectionStage::Urgent);
+
+        // AntiMarineRush with only weak mech signs: upstream (no gas diverted from goons)
+        d = detection();
+        d.antiMarineRush = true;
+        d.vultureOrMachineShopSeen = true;
+        d.twoFactoryOrMech = true;
+        d.enemyVultures = 4;
+        d.timingReached = true;
+        CHECK(decideDetection(d) == DetectionStage::Upstream);
+
+        // Two factory: waits for dragoons at normal priority, then high priority
+        d = detection();
+        d.twoFactoryOrMech = true;
+        d.completedDragoons = 1;
+        CHECK(decideDetection(d) == DetectionStage::ElevatedWaiting);
+        CHECK(!detectionStageIsHighPriority(decideDetection(d)));
+        d.completedDragoons = 2;
+        CHECK(decideDetection(d) == DetectionStage::Elevated);
+        CHECK(detectionStageIsHighPriority(decideDetection(d)));
+
+        // Many vultures without a recognized strategy behave like two-factory
+        d = detection();
+        d.enemyVultures = 3;
+        CHECK(decideDetection(d) == DetectionStage::ElevatedWaiting);
+        d.enemyVultures = 2;
+        d.vultureOrMachineShopSeen = true;
+        CHECK(decideDetection(d) == DetectionStage::Preventive);
+
+        // Timing only: preventive
+        d = detection();
+        d.timingReached = true;
+        CHECK(decideDetection(d) == DetectionStage::Preventive);
+
+        // After the first observer exists, everything returns to upstream (no repeated urgent requests)
+        d = detection();
+        d.mineSeenOrResearched = true;
+        d.completedObservers = 1;
+        CHECK(decideDetection(d) == DetectionStage::Upstream);
+
+        // All observers lost again with mines around: urgent again (replacement of first detection)
+        d.completedObservers = 0;
+        CHECK(decideDetection(d) == DetectionStage::Urgent);
+
+        // Feature off: upstream
+        d.enabled = false;
+        CHECK(decideDetection(d) == DetectionStage::Upstream);
+    }
 }
 
 int main()
 {
     testStuck();
     testRecoveryCooldown();
+    testDetection();
 
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

@@ -10,6 +10,7 @@
   "forced_pvt_opening": "EarlyGameDefense",
   "forced_random_opening": "OneGateCore",
   "early_observer_priority": true,
+  "observer_min_dragoons": 2,
   "natural_cannons": 1,
   "bio_aggression_scale": 0.7,
 

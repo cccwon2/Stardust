@@ -1,5 +1,7 @@
 #pragma once
 
+#include "BnetPolicy.h"
+
 #include "StrategyEngine.h"
 
 class PvT : public StrategyEngine
@@ -75,6 +77,9 @@ private:
 
     // Pluto snipe: whether we have already used the Defensive strategy this game (prevents Normal <-> Defensive oscillation)
     bool plutoDefensiveUsed = false;
+
+    // Pluto snipe: current first-observer request stage (for logging stage changes)
+    BnetPolicy::DetectionStage plutoDetectionStage = BnetPolicy::DetectionStage::Upstream;
 
     TerranStrategy recognizeEnemyStrategy();
 
