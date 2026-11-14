@@ -422,6 +422,58 @@ namespace
         CHECK(pvzProbeCap(true, true, 0) == 0);
         CHECK(pvzProbeCap(false, true, 18) == 0);
     }
+
+    void testCombatFix()
+    {
+        // Effective micro latency
+        CHECK(effectiveMicroLatency(-1, 3, 5) == 5);     // auto on Battle.net: highest seen
+        CHECK(effectiveMicroLatency(-1, 3, 3) == 3);     // auto off in low latency
+        CHECK(effectiveMicroLatency(-1, 3, 4) == 3);
+        CHECK(effectiveMicroLatency(0, 3, 6) == 3);      // off
+        CHECK(effectiveMicroLatency(6, 3, 5) == 6);      // forced
+        CHECK(effectiveMicroLatency(2, 3, 5) == 3);      // never below reported
+        CHECK(effectiveMicroLatency(40, 3, 5) == 12);    // capped
+        CHECK(effectiveRemainingLatency(2, 3, 5) == 4);
+        CHECK(effectiveRemainingLatency(3, 3, 3) == 3);
+        CHECK(effectiveRemainingLatency(3, 3, 6) == 6);
+        CHECK(effectiveRemainingLatency(5, 3, 5) == 5);  // clamped to effective
+        CHECK(clampPredictionFrames(8, 5) == 5);
+        CHECK(clampPredictionFrames(0, 5) == 1);
+        CHECK(clampPredictionFrames(3, 5) == 3);
+
+        // In-flight move guard
+        CHECK(skipInFlightMove(true, false, false, true, 10, 64, 3, 5));
+        CHECK(skipInFlightMove(true, false, false, true, 0, 64, 5, 5));
+        CHECK(!skipInFlightMove(true, false, false, true, 0, 64, 6, 5));    // previous move executed
+        CHECK(!skipInFlightMove(true, false, false, true, 100, 64, 1, 5));  // different target
+        CHECK(!skipInFlightMove(true, true, false, true, 0, 64, 1, 5));     // forced
+        CHECK(!skipInFlightMove(true, false, true, true, 0, 64, 1, 5));     // stuck
+        CHECK(!skipInFlightMove(true, false, false, false, 0, 64, 1, 5));   // last was not a move
+        CHECK(!skipInFlightMove(false, false, false, true, 0, 64, 1, 5));
+
+        // Attack / regroup commitment
+        CHECK(holdAttackCommit(true, 10, 48, 0.3, 0.6));
+        CHECK(!holdAttackCommit(true, 48, 48, 0.3, 0.6));
+        CHECK(!holdAttackCommit(true, 10, 48, 0.7, 0.6));   // hopeless: retreat
+        CHECK(!holdAttackCommit(false, 10, 48, 0.3, 0.6));
+        CHECK(!holdAttackCommit(true, 10, 0, 0.3, 0.6));
+        CHECK(attackAbortStableFrames(true, 24) == 24);
+        CHECK(attackAbortStableFrames(true, 2) == 6);
+        CHECK(attackAbortStableFrames(false, 24) == 6);
+        CHECK(holdRegroupCommit(true, 10, 48));
+        CHECK(!holdRegroupCommit(true, 60, 48));
+        CHECK(!holdRegroupCommit(false, 10, 48));
+
+        // Flee guard
+        FleeGuardInput fg{true, 6, 4, 3, false, 0.5, 0.85};
+        CHECK(fightInsteadOfFlee(fg));
+        fg.siegedTankInRange = true; CHECK(!fightInsteadOfFlee(fg)); fg.siegedTankInRange = false;
+        fg.fastPursuers = 1; CHECK(!fightInsteadOfFlee(fg)); fg.fastPursuers = 2; CHECK(fightInsteadOfFlee(fg));
+        fg.myPercentLost = 0.9; CHECK(!fightInsteadOfFlee(fg)); fg.myPercentLost = 0.5;
+        fg.myUnits = 1; CHECK(!fightInsteadOfFlee(fg)); fg.myUnits = 6;
+        fg.engagedPursuers = 0; CHECK(!fightInsteadOfFlee(fg)); fg.engagedPursuers = 4;
+        fg.enabled = false; CHECK(!fightInsteadOfFlee(fg));
+    }
 }
 
 int main()
@@ -438,6 +490,7 @@ int main()
     testUnstickBackoff();
     testCannonTargets();
     testPvzAllIn();
+    testCombatFix();
 
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

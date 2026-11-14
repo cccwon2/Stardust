@@ -98,6 +98,22 @@ void MyUnitImpl::move(BWAPI::Position position, bool force)
                 BnetLog::moveSkipped();
                 return true;
             }
+
+            // In-flight guard: never resend a near-identical move before the previous one has reached the game
+            // (effective micro latency), even when the unit is close to its target (boids / kiting targets usually are)
+            if (bnetConfig.inFlightMoveGuard && BnetConfig::commandIntervalFrames() > 0 &&
+                BnetPolicy::skipInFlightMove(true,
+                                             force,
+                                             bwapiUnit->isStuck(),
+                                             true,
+                                             lastTarget.getApproxDistance(position),
+                                             bnetConfig.moveResendTolerancePx,
+                                             currentFrame - lastCommandFrame,
+                                             BnetConfig::microLatencyFrames()))
+            {
+                BnetLog::moveSkipped();
+                return true;
+            }
         }
 
         if (bwapiUnit->getLastCommand().getTargetPosition().getApproxDistance(position) > 3) return false;
@@ -107,7 +123,7 @@ void MyUnitImpl::move(BWAPI::Position position, bool force)
         if (bnetGuardMoves && withinCommandInterval(lastCommandFrame)) return true;
 
         // Don't resend orders to similar positions too quickly
-        if (lastCommandFrame > (currentFrame - BWAPI::Broodwar->getLatencyFrames() - 3)) return false;
+        if (lastCommandFrame > (currentFrame - BnetConfig::microLatencyFrames() - 3)) return false;
 
         // Don't resend order if the unit is moving
         return lastCommandFrame < frameLastMoved;

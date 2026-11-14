@@ -84,6 +84,13 @@ powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 | `grid_waypoint_hold` / `grid_waypoint_refresh_px` | `true` / `64` | 경로 웨이포인트를 타일마다 바꾸지 않고 가까워졌을 때만 갱신 |
 | `spell_resend_interval_frames` | `24` | 같은 스테이시스·언로드 명령 재전송 간격 |
 | `unstick_backoff_max_frames` | `192` | 갇힌 일꾼의 Stop·Move 반복 대기 상한 |
+| `micro_latency_frames` | `-1` | 유닛 컨트롤에 쓰는 지연 프레임. 자동은 경기 중 본 최대 지연(4 초과일 때), 0은 원작(BWAPI 보고값), 1-12는 고정 |
+| `in_flight_move_guard` | `true` | 직전 이동이 아직 반영되기 전(지연 프레임 이내)에는 같은 목표 근처로 이동을 다시 보내지 않음 |
+| `pvt_combat_commit` | `true` | 테란전 공격·후퇴 전환 안정화 스위치 |
+| `attack_commit_frames` / `commit_max_loss` | `48` / `0.6` | 공격 시작 후 48프레임은 시뮬레이션이 60% 이상 손실을 예측하지 않으면 후퇴하지 않음 |
+| `attack_abort_stable_frames` | `24` | 후퇴 판단이 이 프레임 동안 유지돼야 공격 중단(원작 6) |
+| `regroup_commit_frames` | `0` | 도망 중이 아닌 재집결을 최소 유지할 프레임; 0은 끔 |
+| `flee_guard` / `flee_guard_max_loss` / `flee_guard_speed_ratio` | `true` / `0.85` / `1.25` | 붙어 있는 적 지상군 절반 이상이 우리보다 빠르면(벌처) 도망 대신 교전; 시즈 탱크 사거리 안이거나 85% 이상 손실 예측이면 도망 |
 | `forced_pvz_opening` | `FFEDragoons` | 저그전 오프닝 고정(`FFEDragoons` / `SairSpeedlot` / `EarlyGameDefense`); 빈 값은 UCB1 |
 | `pvz_antiallin_fix` | `true` | 저그전 저글링 올인 대응 스위치 |
 | `pvz_allin_base_lings` / `pvz_allin_seen_lings` | `6` / `12` | 본진·앞마당에 보인 저글링 / 살아 있는 저글링 수로 올인 조기 확정 |
@@ -110,7 +117,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 - `[APM]`: 2880프레임마다(게임 시간 약 2분) 자체 명령 수(`orders_per_min`, 유닛 종류별 누적), 생략된 이동(`moves_skipped`, `grid_holds`), 반복 명령 생략(`orders_repeat_skipped`), 갇힌 일꾼 대기(`unstick_backoffs`), 지연·명령 간격(`latency_max`, `cmd_interval`)과 기타 누적 카운터
 - `[END]`: 승패, 최종 전략, 종료 APM 및 누적 카운터
 
-명령량은 `orders_per_min`으로 확인하세요. `bwapi_apm`은 Remastered에서 0으로 기록되며, 원래 BWAPI의 감쇠된 최근 APM으로 경기 전체 평균이나 자체 명령 횟수가 아닙니다. `bwapi_apm_at_end`는 종료 시 값, `bwapi_apm_max_sampled`는 주기 표본 중 최대값으로 표본 사이 순간 피크는 놓칠 수 있습니다. `res_*`는 단순 채취 일꾼의 가드 대상 자원 명령만 집계하고, 복구 명령은 `stuck_*`로 별도 집계합니다. `bio_to_attack` / `bio_to_regroup`는 MidGameBio 배율이 적용되는 동안의 실제 상태 전환 횟수입니다.
+명령량은 `orders_per_min`으로 확인하세요. `bwapi_apm`은 Remastered에서 0으로 기록되며, 원래 BWAPI의 감쇠된 최근 APM으로 경기 전체 평균이나 자체 명령 횟수가 아닙니다. `bwapi_apm_at_end`는 종료 시 값, `bwapi_apm_max_sampled`는 주기 표본 중 최대값으로 표본 사이 순간 피크는 놓칠 수 있습니다. `res_*`는 단순 채취 일꾼의 가드 대상 자원 명령만 집계하고, 복구 명령은 `stuck_*`로 별도 집계합니다. `bio_to_attack` / `bio_to_regroup`는 MidGameBio 배율이 적용되는 동안의 실제 상태 전환 횟수입니다. `attack_commit_holds`, `flee_guard_fights`, `dragoon_unsticks`(공격 취소로 멈춘 드라군 Stop), `micro_latency`(실제 적용 지연)는 테란전 교전 수정의 동작 확인용입니다.
 
 코드·문서·빌드 스크립트가 존재하는 것과 실행 검증은 구분합니다.
 

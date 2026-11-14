@@ -77,6 +77,15 @@ namespace BnetLog
     // Stasis / unload orders not re-sent because the same order is still in flight (spell_resend_interval_frames)
     void repeatedOrderSkipped();
 
+    // PvT combat: attacks kept by attack_commit_frames (attack=true) / regroups kept by regroup_commit_frames
+    void combatCommitHold(bool attack);
+
+    // PvT combat: frames where a fleeing cluster fought instead because the pursuers were faster (flee_guard)
+    void fleeGuardFight();
+
+    // Dragoon stop orders sent to unstick a dragoon whose attack was cancelled (upstream MyDragoon::unstick)
+    void dragoonUnstick();
+
     // PvT mech expansion gate state change (logged as an [EVENT] line only when the state changes)
     void mechExpandGate(bool blocked, int bases, int armyUnits, int required);
 }

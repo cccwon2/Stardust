@@ -1,4 +1,5 @@
 #include "General.h"
+#include "BnetConfig.h"
 #include "UnitCluster.h"
 
 #include "PathFinding.h"
@@ -339,7 +340,7 @@ UnitCluster::selectTargets(std::set<Unit> &targetUnits, BWAPI::Position targetPo
             // If the unit isn't on its cooldown yet, simulate the attack on the target for use in later targeting
             // If the unit is on its cooldown, there will be an upcomingAttack already registered on the target
             // This ensures consistency between our targeting and combat sim (avoiding double-counting of damage)
-            if (target && (unit->cooldownUntil - currentFrame) <= (BWAPI::Broodwar->getLatencyFrames() + 2))
+            if (target && (unit->cooldownUntil - currentFrame) <= (BnetConfig::microLatencyFrames() + 2))
             {
                 target->dealDamage(unit);
             }
@@ -417,7 +418,7 @@ UnitCluster::selectTargets(std::set<Unit> &targetUnits, BWAPI::Position targetPo
                     continue;
                 }
 
-                auto predictedRange = unit->getDistance(target.unit, target.unit->predictPosition(BWAPI::Broodwar->getLatencyFrames()));
+                auto predictedRange = unit->getDistance(target.unit, target.unit->predictPosition(BnetConfig::microLatencyFrames()));
                 if (predictedRange > (target.unit->isFlying ? unit->airRange() : unit->groundRange()))
                 {
 #if DEBUG_TARGETING
@@ -535,7 +536,7 @@ UnitCluster::selectTargets(std::set<Unit> &targetUnits, BWAPI::Position targetPo
             {
                 framesToAttack = std::max(
                         framesToAttack,
-                        (int) ((double) targetAndDistToRange.second / unit->type.topSpeed()) + BWAPI::Broodwar->getRemainingLatencyFrames() + 2);
+                        (int) ((double) targetAndDistToRange.second / unit->type.topSpeed()) + BnetConfig::microRemainingLatencyFrames() + 2);
             }
 
             if (framesToAttack < attacker.framesToAttack)
@@ -593,7 +594,7 @@ UnitCluster::selectTargets(std::set<Unit> &targetUnits, BWAPI::Position targetPo
 
         bool isRanged = UnitUtil::IsRangedUnit(unit->type);
         int cooldownMoveFrames = std::max(0,
-                                          unit->cooldownUntil - currentFrame - BWAPI::Broodwar->getRemainingLatencyFrames() - 2);
+                                          unit->cooldownUntil - currentFrame - BnetConfig::microRemainingLatencyFrames() - 2);
 
         int distanceToTargetPosition = unit->getDistance(targetPosition);
         for (auto &potentialTarget : attacker.targets)

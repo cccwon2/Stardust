@@ -466,4 +466,118 @@ namespace BnetPolicy
     {
         return (enabled && allIn && cap > 0) ? cap : 0;
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Micro latency (PvT combat fix)
+    // ---------------------------------------------------------------------------------------------
+
+    // Remastered reports getLatencyFrames() = 5 at game start and 3 later in the game, while commands on Battle.net
+    // actually take 5-6 frames to execute. Upstream micro (dragoon attack windows, cooldown deferral, kiting, position
+    // prediction) is tuned on the reported value, so with 3 it issues moves that cancel dragoon attacks before the shot.
+    // configured: micro_latency_frames (-1 = auto, 0 = off / reported value, >0 = forced).
+    // Auto uses the highest latency seen this game, but only in high-latency (Battle.net) environments.
+    inline int effectiveMicroLatency(int configured, int reportedLatency, int maxSeenLatency)
+    {
+        int result = reportedLatency;
+        if (configured > 0)
+        {
+            result = configured;
+        }
+        else if (configured < 0 && maxSeenLatency > 4)
+        {
+            result = maxSeenLatency;
+        }
+        if (result < reportedLatency) result = reportedLatency;
+        if (result < 1) result = 1;
+        if (result > 12) result = 12;
+        return result;
+    }
+
+    // Remaining latency frames for the effective latency: the reported remaining value shifted by the extra latency
+    inline int effectiveRemainingLatency(int reportedRemaining, int reportedLatency, int effectiveLatency)
+    {
+        int extra = effectiveLatency - reportedLatency;
+        if (extra < 0) extra = 0;
+        int result = reportedRemaining + extra;
+        if (result < 0) result = 0;
+        if (result > effectiveLatency) result = effectiveLatency;
+        return result;
+    }
+
+    // Safe index for position prediction buffers sized at unit creation: clamps frames to [1, size]
+    inline int clampPredictionFrames(int frames, int size)
+    {
+        if (size < 1) return 0;
+        if (frames < 1) return 1;
+        if (frames > size) return size;
+        return frames;
+    }
+
+    // In-flight move guard: a non-worker move to (nearly) the same target as the previous move is pointless while the
+    // previous move has not even reached the game yet (framesSinceLastCommand <= effective latency). Upstream resent
+    // such moves exactly in that window ("lastCommandFrame > currentFrame - LF - 3" -> resend), producing up to one move
+    // per unit per frame in fights.
+    inline bool skipInFlightMove(bool enabled, bool force, bool stuck, bool lastWasMove, int distToLastTarget, int tolerance,
+                                 int framesSinceLastCommand, int effectiveLatency)
+    {
+        if (!enabled || force || stuck || !lastWasMove) return false;
+        if (distToLastTarget > tolerance) return false;
+        return framesSinceLastCommand <= effectiveLatency;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // PvT combat commitment (attack <-> regroup hysteresis)
+    // ---------------------------------------------------------------------------------------------
+
+    // Attacking cluster whose sim now says retreat: keep attacking while the attack is younger than commitFrames and
+    // the sim does not predict losing more than maxLoss of our army. Turning around under fire against vultures /
+    // tanks loses units for nothing; the log showed ~35 attack<->regroup flips per minute late in a lost game.
+    inline bool holdAttackCommit(bool enabled, int framesSinceActivityChange, int commitFrames, double myPercentLost, double maxLoss)
+    {
+        if (!enabled || commitFrames <= 0) return false;
+        if (framesSinceActivityChange >= commitFrames) return false;
+        return myPercentLost < maxLoss;
+    }
+
+    // Upstream aborts an attack once the retreat recommendation has been stable for 6 frames (one command latency on
+    // Battle.net). Effective stable-frame requirement before aborting.
+    inline int attackAbortStableFrames(bool enabled, int configured)
+    {
+        if (!enabled) return 6;
+        return configured > 6 ? configured : 6;
+    }
+
+    // Regrouping cluster whose sim now says attack: stay regrouping while the regroup is younger than commitFrames,
+    // so a cluster that just turned around does not immediately turn back into the same fight.
+    inline bool holdRegroupCommit(bool enabled, int framesSinceActivityChange, int commitFrames)
+    {
+        if (!enabled || commitFrames <= 0) return false;
+        return framesSinceActivityChange < commitFrames;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Flee guard
+    // ---------------------------------------------------------------------------------------------
+
+    struct FleeGuardInput
+    {
+        bool enabled;               // flee_guard and enemy Terran (pluto_pvt_snipe)
+        int myUnits;                // Mobile ground units in the cluster
+        int engagedPursuers;        // Armed enemy ground units within reach of our units
+        int fastPursuers;           // ... of which are faster than our slowest unit by speedRatio (vultures)
+        bool siegedTankInRange;     // A sieged tank covers the cluster (fleeing out of tank range is right)
+        double myPercentLost;       // Combat sim: share of our army lost if we fight
+        double maxLoss;             // flee_guard_max_loss
+    };
+
+    // Whether a cluster that wants to flee should fight instead: the units engaging us are mostly faster than us, so
+    // fleeing just gives them free shots (dragoons running from vultures), and the fight is not hopeless.
+    inline bool fightInsteadOfFlee(const FleeGuardInput &in)
+    {
+        if (!in.enabled) return false;
+        if (in.myUnits < 2 || in.engagedPursuers <= 0) return false;
+        if (in.siegedTankInRange) return false;
+        if (in.fastPursuers * 2 < in.engagedPursuers) return false;
+        return in.myPercentLost < in.maxLoss;
+    }
 }

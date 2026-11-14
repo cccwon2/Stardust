@@ -199,6 +199,36 @@ Each base writes `[EVENT] cannon_plan base=main|natural|expansion tile=x,y targe
 
 Not changed: the arbiter condition (3 nexuses, 20+ army), carrier switch (disabled upstream), unit micro.
 
+## PvT combat fix (2026-11-15 Backrooms replay)
+
+Loss in 15:08 to a human Terran (mandar2n, mech) on Backrooms 1.1 with `bnet-pluto@696a54c0`. Replay: 75,296 bot
+commands (APM 4,973 vs. 326); 36,092 of 37,169 targeted orders were Move and only 782 Attack. Per unit, 16,045 moves
+followed the previous move of the same unit within 0-3 frames. 35% of attack orders (194 of 545) were followed by a move
+to the same unit within 1-6 frames, i.e. before a dragoon can fire. 72 of the 174 Stop orders went to fighting units in
+the two big fights (minutes 11 and 14): upstream `MyDragoon::unstick` stops dragoons whose attack was cancelled. The log
+showed `mech_to_attack` 28 -> 124 and `mech_to_regroup` 13 -> 99 in the last three minutes (attack <-> regroup flips).
+
+Root cause candidate: Remastered reports `getLatencyFrames()` = 5 at game start and 3 later (`[APM] latency_frames=3`,
+`latency_max=5`), while Battle.net commands take 5-6 frames (measured by the Pluto bridge). All upstream micro timing
+(dragoon attack window, cooldown deferral, kiting, position prediction, in-flight command simulation) used the reported 3.
+
+| Key | Default | Description |
+|---|---|---|
+| `micro_latency_frames` | `-1` | Latency used by unit micro instead of the BWAPI value. `-1` = auto: the highest latency seen this game when it is above 4 (Battle.net), otherwise the reported value. `0` = upstream (reported value). `1-12` = forced; try `6` if `[APM] micro_latency=5` and dragoons still cancel attacks. Never below the reported value. Prediction buffers are sized for 12 + 2 frames and indexes are clamped. Workers / mining code is unchanged. |
+| `in_flight_move_guard` | `true` | Non-workers on Battle.net: a move to within `move_resend_tolerance_px` of the previous move target is skipped while the previous move is still in flight (frames since it <= micro latency), even close to the target. Upstream resent exactly in that window. About 17% of this replay's moves fall in it (replay estimate, not measured in game). Counted in `moves_skipped`. |
+| `pvt_combat_commit` | `true` | vs. Terran (`pluto_pvt_snipe` on): master switch for the three keys below. |
+| `attack_commit_frames` / `commit_max_loss` | `48` / `0.6` | An attack younger than 48 frames is kept when the sim flips to retreat, unless it predicts losing at least 60% of the cluster. The upstream immediate aborts (first sim, enemy +20%, fight now across a narrow choke) still apply first. |
+| `attack_abort_stable_frames` | `24` | The retreat recommendation must be stable this many frames before an attack is aborted (upstream 6, one command latency on Battle.net) (6-96). |
+| `regroup_commit_frames` | `0` | Optional: a non-flee regroup (stand ground / contain) younger than this is kept when the sim flips to attack. Never applied while fleeing or when pushed back to the natural. `0` = off. |
+| `flee_guard` / `flee_guard_max_loss` / `flee_guard_speed_ratio` | `true` / `0.85` / `1.25` | vs. Terran: when a regrouping cluster would flee, but at least half of the armed enemy ground units within reach (64px) are faster than our slowest ground unit by the ratio (vultures vs. dragoons), and no sieged tank covers the cluster, and the sim predicts losing less than 85%, the cluster attacks instead of running. Mines are ignored. |
+
+Log counters (`[APM]` / `[END]`): `attack_commit_holds`, `regroup_commit_holds`, `flee_guard_fights` (frames),
+`dragoon_unsticks` (cancelled-attack stops), `micro_latency` (effective value). `[START]` lists the new keys with
+`micro_latency_frames=-1(eff=N)`; the effective value at frame 0 is the reported start latency.
+
+Not verified: the real Battle.net latency as seen by Stardust (no in-game measurement; the 5-6 frames come from the
+Pluto bridge), Windows build, and any effect on win rate. Not changed: combat sim, targeting, unit types, build orders.
+
 ## PvZ vs. zergling all-ins (2026-11-15 Radeon replay)
 
 Loss in 6:15 to a human 12 pool -> hatchery -> speedling all-in (pool 1:17, speed 3:38, about 24 zergling morphs). The

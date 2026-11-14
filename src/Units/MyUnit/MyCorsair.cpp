@@ -1,4 +1,5 @@
 #include "MyCorsair.h"
+#include "BnetConfig.h"
 
 #include "Geo.h"
 #include "Map.h"
@@ -14,7 +15,7 @@ bool MyCorsair::isReady() const
     if (!MyUnitImpl::isReady()) return false;
 
     // Not ready if we are in our attack animation
-    if (lastSeenAttacking > 0 && (lastSeenAttacking + ATTACK_FRAMES) > (currentFrame + BWAPI::Broodwar->getRemainingLatencyFrames()))
+    if (lastSeenAttacking > 0 && (lastSeenAttacking + ATTACK_FRAMES) > (currentFrame + BnetConfig::microRemainingLatencyFrames()))
     {
         return false;
     }
@@ -54,9 +55,9 @@ void MyCorsair::attackUnit(const Unit &target,
     // If we have sent an attack order recently, check if we still expect the attack to take place
     // We don't need to consider when we are in our attack animation, as that is handled by isReady
     if (bwapiUnit->getLastCommand().getType() == BWAPI::UnitCommandTypes::Attack_Unit &&
-        lastCommandFrame > (currentFrame - BWAPI::Broodwar->getLatencyFrames() - 1))
+        lastCommandFrame > (currentFrame - BnetConfig::microLatencyFrames() - 1))
     {
-        int lastCommandTakesEffect = lastCommandFrame + BWAPI::Broodwar->getLatencyFrames() - currentFrame;
+        int lastCommandTakesEffect = lastCommandFrame + BnetConfig::microLatencyFrames() - currentFrame;
         if (validateAttack(lastCommandTakesEffect))
         {
 #if DEBUG_UNIT_ORDERS
@@ -153,14 +154,14 @@ void MyCorsair::attackUnit(const Unit &target,
 
         // If this is the frame that our attack animation ended, move if we need to change speed
         if ((accelerate || (decelerate && bwapiUnit->isAccelerating()))
-            && (lastSeenAttacking + ATTACK_FRAMES) == (currentFrame + BWAPI::Broodwar->getRemainingLatencyFrames()))
+            && (lastSeenAttacking + ATTACK_FRAMES) == (currentFrame + BnetConfig::microRemainingLatencyFrames()))
         {
 #if DEBUG_UNIT_ORDERS
             CherryVis::log(id) << "Attack: Moving for one frame before continuing attack";
 #endif
         }
-        else if (decelerate || (cooldownUntil - currentFrame <= BWAPI::Broodwar->getRemainingLatencyFrames() &&
-                 validateAttack(BWAPI::Broodwar->getRemainingLatencyFrames())))
+        else if (decelerate || (cooldownUntil - currentFrame <= BnetConfig::microRemainingLatencyFrames() &&
+                 validateAttack(BnetConfig::microRemainingLatencyFrames())))
         {
 #if DEBUG_UNIT_ORDERS
             CherryVis::log(id) << "Sending attack command";
@@ -169,7 +170,7 @@ void MyCorsair::attackUnit(const Unit &target,
             return;
         }
 
-        moveTarget = target->predictPosition(BWAPI::Broodwar->getRemainingLatencyFrames());
+        moveTarget = target->predictPosition(BnetConfig::microRemainingLatencyFrames());
 
 #if DEBUG_UNIT_ORDERS
         CherryVis::log(id) << "Attack: Moving to target @ " << BWAPI::WalkPosition(moveTarget);
@@ -189,8 +190,8 @@ void MyCorsair::attackUnit(const Unit &target,
     if (decelerate)
     {
         // Scale depending on where we expect to be
-        auto myPos = frameLastMoved == currentFrame ? simulatePosition(BWAPI::Broodwar->getRemainingLatencyFrames()) : lastPosition;
-        auto targetPos = target->predictPosition(BWAPI::Broodwar->getRemainingLatencyFrames());
+        auto myPos = frameLastMoved == currentFrame ? simulatePosition(BnetConfig::microRemainingLatencyFrames()) : lastPosition;
+        auto targetPos = target->predictPosition(BnetConfig::microRemainingLatencyFrames());
         auto vector = Geo::ScaleVector(targetPos - myPos, 8);
         if (vector != BWAPI::Positions::Invalid)
         {

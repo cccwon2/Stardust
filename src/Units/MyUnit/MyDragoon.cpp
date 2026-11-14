@@ -1,4 +1,6 @@
 #include "MyDragoon.h"
+#include "BnetConfig.h"
+#include "BnetLog.h"
 
 #include "UnitUtil.h"
 #include "Units.h"
@@ -50,7 +52,7 @@ void MyDragoon::update(BWAPI::Unit unit)
     MyUnitImpl::update(unit);
 
     // If we're not currently in an attack, predict the frame when the next attack will start
-    if (currentFrame - lastAttackStartedAt > DRAGOON_ATTACK_FRAMES - BWAPI::Broodwar->getRemainingLatencyFrames())
+    if (currentFrame - lastAttackStartedAt > DRAGOON_ATTACK_FRAMES - BnetConfig::microRemainingLatencyFrames())
     {
         nextAttackPredictedAt = 0;
 
@@ -60,7 +62,7 @@ void MyDragoon::update(BWAPI::Unit unit)
         {
             nextAttackPredictedAt = std::max(
                     currentFrame + 1, std::max(
-                            lastCommandFrame + BWAPI::Broodwar->getLatencyFrames(),
+                            lastCommandFrame + BnetConfig::microLatencyFrames(),
                             cooldownUntil));
         }
     }
@@ -72,10 +74,11 @@ bool MyDragoon::unstick()
 
     // This checks for the case of cancelled attacks sticking a dragoon
     if (bwapiUnit->isMoving() && potentiallyStuckSince > 0
-        && potentiallyStuckSince < (currentFrame - BWAPI::Broodwar->getLatencyFrames() - 10))
+        && potentiallyStuckSince < (currentFrame - BnetConfig::microLatencyFrames() - 10))
     {
         stop();
-        unstickUntil = currentFrame + BWAPI::Broodwar->getRemainingLatencyFrames();
+        BnetLog::dragoonUnstick();
+        unstickUntil = currentFrame + BnetConfig::microRemainingLatencyFrames();
         potentiallyStuckSince = 0;
         return true;
     }
@@ -88,14 +91,14 @@ bool MyDragoon::isReady() const
     if (!MyUnitImpl::isReady()) return false;
 
     // If the last attack has just started, give the dragoon some frames to complete it
-    if (currentFrame - lastAttackStartedAt + BWAPI::Broodwar->getRemainingLatencyFrames() <= DRAGOON_ATTACK_FRAMES)
+    if (currentFrame - lastAttackStartedAt + BnetConfig::microRemainingLatencyFrames() <= DRAGOON_ATTACK_FRAMES)
     {
         return false;
     }
 
     // If the next attack is predicted to happen within remaining latency frames, we may want to leave the dragoon alone
     int framesToNextAttack = nextAttackPredictedAt - currentFrame;
-    if (framesToNextAttack > 0 && framesToNextAttack <= BWAPI::Broodwar->getRemainingLatencyFrames())
+    if (framesToNextAttack > 0 && framesToNextAttack <= BnetConfig::microRemainingLatencyFrames())
     {
         BWAPI::Unit target = bwapiUnit->getLastCommand().getTarget();
 
@@ -129,7 +132,7 @@ void MyDragoon::attackUnit(const Unit &target,
     bool rangingBunker = target->type == BWAPI::UnitTypes::Terran_Bunker && myRange > targetRange;
 
     // If we are not on cooldown, defer to normal unit attack unless we are ranging a bunker
-    if (!rangingBunker && cooldown <= BWAPI::Broodwar->getRemainingLatencyFrames() + 2)
+    if (!rangingBunker && cooldown <= BnetConfig::microRemainingLatencyFrames() + 2)
     {
         // Special case, if we are in a no-go area, move out of it
         if (NoGoAreas::isNoGo(tilePositionX, tilePositionY))
@@ -148,11 +151,11 @@ void MyDragoon::attackUnit(const Unit &target,
     int currentDistanceToTarget = getDistance(target, target->simPosition);
 
     // Handle ranging a bunker and not on cooldown
-    if (rangingBunker && cooldown <= BWAPI::Broodwar->getRemainingLatencyFrames() + 2)
+    if (rangingBunker && cooldown <= BnetConfig::microRemainingLatencyFrames() + 2)
     {
         // What we do depends on where we are and where we're going
 
-        auto myPredictedPosition = predictPosition(BWAPI::Broodwar->getRemainingLatencyFrames());
+        auto myPredictedPosition = predictPosition(BnetConfig::microRemainingLatencyFrames());
         int predictedDistanceToTarget = Geo::EdgeToEdgeDistance(type, myPredictedPosition, target->type, target->simPosition);
 
         // Well out of range: attack
@@ -180,7 +183,7 @@ void MyDragoon::attackUnit(const Unit &target,
         // Otherwise fall through to move boids
     }
 
-    BWAPI::Position predictedTargetPosition = target->predictPosition(BWAPI::Broodwar->getRemainingLatencyFrames() + 2);
+    BWAPI::Position predictedTargetPosition = target->predictPosition(BnetConfig::microRemainingLatencyFrames() + 2);
     int predictedDistanceToTarget = getDistance(target, predictedTargetPosition);
 
     // Compute our preferred distance to the target
@@ -220,7 +223,7 @@ void MyDragoon::attackUnit(const Unit &target,
     else if (myRange >= targetRange)
     {
         // The target is stationary or moving towards us, so kite it if we can
-        int cooldownDistance = (int) ((double) (cooldown - BWAPI::Broodwar->getRemainingLatencyFrames() - 2) * type.topSpeed());
+        int cooldownDistance = (int) ((double) (cooldown - BnetConfig::microRemainingLatencyFrames() - 2) * type.topSpeed());
         desiredDistance = std::min(myRange, myRange + (cooldownDistance - (predictedDistanceToTarget - myRange)) / 2);
 
         // If the target's range is much lower than ours, keep a bit closer

@@ -11,6 +11,9 @@
 #include "EnemyArmy.h"
 #include "General.h"
 #include "Map.h"
+#include "BnetConfig.h"
+#include "BnetLog.h"
+#include "BnetPolicy.h"
 
 /*
  * Orders a cluster to regroup.
@@ -274,6 +277,59 @@ namespace
         // We may want to make this less strict later
         return initialSimResult.myPercentLost() < 0.001;
     }
+
+    // Battle.net PvT flee guard (flee_guard): fleeing from units that are faster than our army (vultures) only gives
+    // them free shots, so fight instead when most engaging enemies are faster and the fight is not hopeless.
+    bool bnetFightInsteadOfFlee(const UnitCluster &cluster, std::set<Unit> &enemyUnits, const CombatSimResult &simResult)
+    {
+        auto &bnetConfig = BnetConfig::get();
+        if (!bnetConfig.plutoPvtSnipe || !bnetConfig.fleeGuard) return false;
+        auto enemy = BWAPI::Broodwar->enemy();
+        if (!enemy || enemy->getRace() != BWAPI::Races::Terran) return false;
+
+        std::vector<MyUnit> myGround;
+        double slowest = 1000.0;
+        for (const auto &myUnit : cluster.units)
+        {
+            if (myUnit->isFlying || myUnit->type.isBuilding()) continue;
+            myGround.push_back(myUnit);
+            slowest = std::min(slowest, Players::unitTopSpeed(BWAPI::Broodwar->self(), myUnit->type));
+        }
+        if (myGround.size() < 2) return false;
+
+        BnetPolicy::FleeGuardInput input{true, (int)myGround.size(), 0, 0, false, simResult.myPercentLost(), bnetConfig.fleeGuardMaxLoss};
+        for (const auto &enemyUnit : enemyUnits)
+        {
+            if (!enemyUnit->lastPositionValid || enemyUnit->isFlying || enemyUnit->type.isBuilding()) continue;
+            if (enemyUnit->type == BWAPI::UnitTypes::Terran_Vulture_Spider_Mine) continue;
+            if (!enemyUnit->canAttackGround()) continue;
+
+            bool engaged = false;
+            for (const auto &myUnit : myGround)
+            {
+                if (myUnit->isInEnemyWeaponRange(enemyUnit, 64))
+                {
+                    engaged = true;
+                    break;
+                }
+            }
+            if (!engaged) continue;
+
+            if (enemyUnit->type == BWAPI::UnitTypes::Terran_Siege_Tank_Siege_Mode)
+            {
+                input.siegedTankInRange = true;
+                continue;
+            }
+
+            input.engagedPursuers++;
+            if (Players::unitTopSpeed(enemyUnit->player, enemyUnit->type) >= slowest * bnetConfig.fleeGuardSpeedRatio)
+            {
+                input.fastPursuers++;
+            }
+        }
+
+        return BnetPolicy::fightInsteadOfFlee(input);
+    }
 }
 
 void UnitCluster::regroup(std::vector<std::pair<MyUnit, Unit>> &unitsAndTargets,
@@ -471,6 +527,13 @@ void UnitCluster::regroup(std::vector<std::pair<MyUnit, Unit>> &unitsAndTargets,
         }
         case SubActivity::Flee:
         {
+            if (bnetFightInsteadOfFlee(*this, enemyUnits, simResult))
+            {
+                BnetLog::fleeGuardFight();
+                attack(unitsAndTargets, targetPosition);
+                return;
+            }
+
             flee(enemyUnits);
 
             break;

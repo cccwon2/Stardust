@@ -1,4 +1,6 @@
 #include "Unit.h"
+#include "BnetConfig.h"
+#include "BnetPolicy.h"
 
 #include "UnitUtil.h"
 #include "Geo.h"
@@ -72,7 +74,7 @@ bool UnitImpl::isTraining() const
     if (bwapiUnit->isTraining()) return true;
 
     if (bwapiUnit->getLastCommand().getType() == BWAPI::UnitCommandTypes::Train &&
-        (currentFrame - lastCommandFrame - 1) <= BWAPI::Broodwar->getLatencyFrames())
+        (currentFrame - lastCommandFrame - 1) <= BnetConfig::microLatencyFrames())
     {
         return true;
     }
@@ -229,7 +231,8 @@ int UnitImpl::getDistance(const Unit &other, BWAPI::Position predictedOtherPosit
 BWAPI::Position UnitImpl::predictPosition(int frames) const
 {
     updatePredictedPositions();
-    return predictedPositions[frames-1];
+    if (predictedPositions.empty()) return lastPosition;
+    return predictedPositions[BnetPolicy::clampPredictionFrames(frames, (int)predictedPositions.size()) - 1];
 }
 
 // Computes the intercept point of a unit targeting another one, assuming the interceptor

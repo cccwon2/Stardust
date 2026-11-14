@@ -45,9 +45,9 @@ MyUnitImpl::MyUnitImpl(BWAPI::Unit unit)
         , simulatedPositionsUpdated(false)
         , visible(isVisible(unit))
 {
-    recentCommands.resize(BWAPI::Broodwar->getLatencyFrames() + 1, unit->getLastCommand());
-    simulatedPositions.resize(BWAPI::Broodwar->getLatencyFrames() + 1, unit->getPosition());
-    simulatedHeading.resize(BWAPI::Broodwar->getLatencyFrames() + 1, 0);
+    recentCommands.resize(BnetConfig::microLatencyFrames() + 1, unit->getLastCommand());
+    simulatedPositions.resize(BnetConfig::microLatencyFrames() + 1, unit->getPosition());
+    simulatedHeading.resize(BnetConfig::microLatencyFrames() + 1, 0);
 #if DEBUG_ORDER_PROCESS_INDEX
     CherryVis::log(id) << "Order process index: " << orderProcessIndex;
 #endif
@@ -86,6 +86,17 @@ void MyUnitImpl::update(BWAPI::Unit unit)
     }
 
     // Update command positions
+    // Battle.net: keep the in-flight command window at the effective micro latency (+1); it can grow during the game
+    {
+        size_t wanted = (size_t)BnetConfig::microLatencyFrames() + 1;
+        while (recentCommands.size() < wanted) recentCommands.push_front(recentCommands.empty() ? unit->getLastCommand() : recentCommands.front());
+        while (recentCommands.size() > wanted) recentCommands.pop_front();
+        if (simulatedPositions.size() != wanted)
+        {
+            simulatedPositions.resize(wanted, unit->getPosition());
+            simulatedHeading.resize(wanted, 0);
+        }
+    }
     recentCommands.pop_front();
     recentCommands.emplace_back(unit->getLastCommand());
     if (recentCommands.back().target)
@@ -146,7 +157,7 @@ void MyUnitImpl::update(BWAPI::Unit unit)
         unit->getLastCommand().getType() != BWAPI::UnitCommandTypes::Cancel_Train &&
         unit->getLastCommand().getType() != BWAPI::UnitCommandTypes::Cancel_Train_Slot &&
         unit->getTrainingQueue().size() > 1 &&
-        lastCommandFrame < (currentFrame - BWAPI::Broodwar->getLatencyFrames()))
+        lastCommandFrame < (currentFrame - BnetConfig::microLatencyFrames()))
     {
         Log::Get() << "WARNING: Training queue for " << unit->getType() << " @ " << unit->getTilePosition()
                    << " is too deep! Cancelling later units.";
@@ -201,8 +212,8 @@ void MyUnitImpl::attackUnit(const Unit &target,
         return;
     }
 
-    auto myPredictedPosition = predictPosition(BWAPI::Broodwar->getRemainingLatencyFrames());
-    auto targetPredictedPosition = target->predictPosition(BWAPI::Broodwar->getRemainingLatencyFrames());
+    auto myPredictedPosition = predictPosition(BnetConfig::microRemainingLatencyFrames());
+    auto targetPredictedPosition = target->predictPosition(BnetConfig::microRemainingLatencyFrames());
     auto predictedDist = Geo::EdgeToEdgeDistance(type, myPredictedPosition, target->type, targetPredictedPosition);
     auto rangeToTarget = range(target);
 
@@ -211,12 +222,12 @@ void MyUnitImpl::attackUnit(const Unit &target,
     {
         // Re-send the attack command when we are coming into range
         bool forceAttackCommand = false;
-        if (dist > rangeToTarget && predictedDist <= rangeToTarget && cooldownUntil < (currentFrame + BWAPI::Broodwar->getRemainingLatencyFrames())
+        if (dist > rangeToTarget && predictedDist <= rangeToTarget && cooldownUntil < (currentFrame + BnetConfig::microRemainingLatencyFrames())
             && bwapiUnit->getLastCommand().type == BWAPI::UnitCommandTypes::Attack_Unit)
         {
             // If we recently sent the attack command, check our predicted distance when it will kick in
             // If we still expect to be in range, we don't need to do anything
-            int lastCommandTakesEffect = lastCommandFrame + BWAPI::Broodwar->getLatencyFrames() - currentFrame;
+            int lastCommandTakesEffect = lastCommandFrame + BnetConfig::microLatencyFrames() - currentFrame;
             if (lastCommandTakesEffect >= 0)
             {
                 auto distAtAttackFrame =
@@ -256,7 +267,7 @@ void MyUnitImpl::attackUnit(const Unit &target,
 
     // Plot an intercept course
     auto interceptPosition = intercept(target);
-    if (!interceptPosition.isValid()) interceptPosition = target->predictPosition(BWAPI::Broodwar->getLatencyFrames() + 2);
+    if (!interceptPosition.isValid()) interceptPosition = target->predictPosition(BnetConfig::microLatencyFrames() + 2);
 
 #if DEBUG_UNIT_ORDERS
     CherryVis::log(id) << "Attack: Moving to intercept @ " << BWAPI::WalkPosition(interceptPosition);
@@ -308,7 +319,7 @@ bool MyUnitImpl::unstick()
 
 int MyUnitImpl::nextUnstickWait()
 {
-    int base = BWAPI::Broodwar->getRemainingLatencyFrames();
+    int base = BnetConfig::microRemainingLatencyFrames();
 
     // Battle.net only, workers only: a trapped worker used to get a stop + move every ~12 frames for minutes.
     // Army units keep upstream timing, since callers also use unstick() before attacking.
@@ -338,14 +349,16 @@ BWAPI::Position MyUnitImpl::simulatePosition(int frames) const
 {
     if (!simulatedPositionsUpdated) updateSimulatedPositions();
 
-    return simulatedPositions[frames - 1];
+    if (simulatedPositions.empty()) return lastPosition;
+    return simulatedPositions[BnetPolicy::clampPredictionFrames(frames, (int)simulatedPositions.size()) - 1];
 }
 
 int MyUnitImpl::simulateHeading(int frames) const
 {
     if (!simulatedPositionsUpdated) updateSimulatedPositions();
 
-    return simulatedHeading[frames - 1];
+    if (simulatedHeading.empty()) return BWHeading();
+    return simulatedHeading[BnetPolicy::clampPredictionFrames(frames, (int)simulatedHeading.size()) - 1];
 }
 
 void MyUnitImpl::updateSimulatedPositions() const

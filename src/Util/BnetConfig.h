@@ -58,6 +58,19 @@ namespace BnetConfig
         int spellResendIntervalFrames = 24;     // Minimum frames between identical stasis / unload orders. 0 = off
         int unstickBackoffMaxFrames = 192;      // Backoff cap for repeatedly stuck workers (stop / move loop). 0 = off
 
+        // Combat fixes (Battle.net latency, attack <-> regroup oscillation, fleeing from faster units)
+        int microLatencyFrames = -1;            // Latency used by unit micro: -1 = auto (highest seen when > 4), 0 = reported
+                                                // by BWAPI (upstream), >0 = forced (1-12)
+        bool inFlightMoveGuard = true;          // Don't resend a near-identical move while the previous one is still in flight
+        bool pvtCombatCommit = true;            // vs. Terran: attack / regroup commitment below
+        int attackCommitFrames = 48;            // Keep a new attack at least this long unless the sim predicts losing > commit_max_loss
+        double commitMaxLoss = 0.6;             // Share of our army the sim may predict losing while an attack is held
+        int attackAbortStableFrames = 24;       // Retreat recommendation must be stable this long before aborting (upstream 6)
+        int regroupCommitFrames = 0;            // Keep a new (non-flee) regroup at least this long before attacking again. 0 = off
+        bool fleeGuard = true;                  // vs. Terran: fight instead of fleeing when the pursuers are faster (vultures)
+        double fleeGuardMaxLoss = 0.85;         // ... unless the sim predicts losing at least this share of our army
+        double fleeGuardSpeedRatio = 1.25;      // Pursuer counts as faster when its top speed >= ratio * our slowest unit
+
         // PvZ vs. zergling all-ins (pool first -> mass speedlings)
         std::string forcedPvzOpening = "FFEDragoons";   // PvZ opening used instead of UCB1: FFEDragoons, SairSpeedlot,
                                                         // EarlyGameDefense (empty = use UCB1)
@@ -95,4 +108,12 @@ namespace BnetConfig
     // Highest latency observed this game (updated by commandIntervalFrames / noteLatency)
     int maxLatencyFrames();
     void noteLatency();
+
+    // Latency used by unit micro instead of BWAPI::Broodwar->getLatencyFrames() / getRemainingLatencyFrames()
+    // (micro_latency_frames, see BnetPolicy::effectiveMicroLatency)
+    int microLatencyFrames();
+    int microRemainingLatencyFrames();
+
+    // Upper bound for per-unit prediction buffers (latency + margin), independent of when the unit was created
+    int predictionBufferFrames();
 }

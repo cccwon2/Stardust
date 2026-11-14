@@ -7,6 +7,7 @@
 #include "StrategyEngine.h"
 #include "BnetConfig.h"
 #include "BnetLog.h"
+#include "BnetPolicy.h"
 
 #include "DebugFlag_CombatSim.h"
 
@@ -44,6 +45,15 @@ namespace
     bool bnetMechScalesActive()
     {
         return BnetConfig::get().pvtMechFix && bnetEnemyStrategyIs("MidGameMech");
+    }
+
+    // PvT combat commitment (pvt_combat_commit): enemy Terran, pluto_pvt_snipe on
+    bool bnetCombatCommitActive()
+    {
+        auto &bnetConfig = BnetConfig::get();
+        if (!bnetConfig.plutoPvtSnipe || !bnetConfig.pvtCombatCommit) return false;
+        auto enemy = BWAPI::Broodwar->enemy();
+        return enemy && enemy->getRace() == BWAPI::Races::Terran;
     }
 
     double bnetAggressionScale(BioDecision decision)
@@ -277,12 +287,25 @@ namespace
             return false;
         }
 
+        // Battle.net PvT: don't turn around right after starting an attack unless the sim predicts heavy losses.
+        // Units that retreat under fire from vultures / tanks die without shooting back.
+        bool commitActive = bnetCombatCommitActive();
+        if (BnetPolicy::holdAttackCommit(commitActive,
+                                         currentFrame - cluster.lastActivityChange,
+                                         BnetConfig::get().attackCommitFrames,
+                                         simResult.myPercentLost(),
+                                         BnetConfig::get().commitMaxLoss))
+        {
+            BnetLog::combatCommitHold(true);
+            return true;
+        }
+
         int attackFrames;
         int regroupFrames;
         int consecutiveRetreatFrames = UnitCluster::consecutiveSimResults(cluster.recentSimResults, &attackFrames, &regroupFrames, 48);
 
-        // Continue if the sim hasn't been stable for 6 frames
-        if (consecutiveRetreatFrames < 6)
+        // Continue if the sim hasn't been stable for 6 frames (attack_abort_stable_frames vs. Terran on Battle.net)
+        if (consecutiveRetreatFrames < BnetPolicy::attackAbortStableFrames(commitActive, BnetConfig::get().attackAbortStableFrames))
         {
 #if DEBUG_COMBATSIM_LOG
             CherryVis::log() << BWAPI::WalkPosition(cluster.center) << ": continuing attack as the sim has not yet been stable for 6 frames";
@@ -358,6 +381,18 @@ namespace
 
         simResult.decision = shouldAttack(cluster, simResult, aggression);
         if (!simResult.decision) return false;
+
+        // Battle.net PvT: a cluster that just turned around keeps regrouping for regroup_commit_frames instead of
+        // immediately turning back into the same fight (attack <-> regroup oscillation). Not when defending the natural,
+        // and not while fleeing (a fleeing cluster that can win should turn around immediately). Off by default (0).
+        if (BnetPolicy::holdRegroupCommit(bnetCombatCommitActive() && !pushedBackToNatural(cluster, 500) &&
+                                          cluster.currentSubActivity != UnitCluster::SubActivity::Flee,
+                                          currentFrame - cluster.lastActivityChange,
+                                          BnetConfig::get().regroupCommitFrames))
+        {
+            BnetLog::combatCommitHold(false);
+            return false;
+        }
 
         int attackFrames;
         int regroupFrames;

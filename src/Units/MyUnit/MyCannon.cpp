@@ -1,4 +1,5 @@
 #include "MyCannon.h"
+#include "BnetConfig.h"
 
 bool MyCannon::isReady() const
 {
@@ -6,11 +7,11 @@ bool MyCannon::isReady() const
     if (issuedOrderThisFrame) return false;
 
     // We aren't ready while on cooldown, adjusted for latency
-    if (cooldownUntil > (currentFrame + BWAPI::Broodwar->getRemainingLatencyFrames() + 1)) return false;
+    if (cooldownUntil > (currentFrame + BnetConfig::microRemainingLatencyFrames() + 1)) return false;
 
     // We aren't ready if we have just sent the attack command
     if (bwapiUnit->getLastCommand().type == BWAPI::UnitCommandTypes::Attack_Unit &&
-        lastCommandFrame >= (currentFrame - BWAPI::Broodwar->getLatencyFrames()))
+        lastCommandFrame >= (currentFrame - BnetConfig::microLatencyFrames()))
     {
         return false;
     }
