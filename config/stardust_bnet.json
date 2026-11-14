@@ -29,5 +29,6 @@
   "combat_move_guard": true,
   "move_resend_tolerance_px": 24,
 
+  "print_build_info": true,
   "bnet_log": true
 }

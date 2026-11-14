@@ -12,6 +12,18 @@ namespace BnetLog
     // Call at the end of onStart (after BnetConfig and Opponent are initialized)
     void gameStart();
 
+    // Build identifier compiled into the DLL (<branch>@<short hash>[-dirty], from CMake STARDUST_BUILD_ID)
+    const char *buildId();
+
+    // Local-only in-game message (Broodwar->printf, not sent to other players) with the build id and config source.
+    // Controlled by print_build_info; independent of BNET_LOG_ENABLED / bnet_log. Call after BnetConfig::initialize.
+    void printBuildInfo();
+
+    // Same two lines drawn with Broodwar->drawTextScreen (debug overlay) for the first 30 game seconds.
+    // On Battle.net the Remastered bridge does not display native printf text (it writes it to its log instead),
+    // but it may show debug drawing through its overlay window. Call once per frame.
+    void drawBuildInfo();
+
     // Call once per frame; writes a periodic [APM] line every 2 game minutes (2880 frames)
     void onFrame();
 

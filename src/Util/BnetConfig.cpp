@@ -163,6 +163,7 @@ namespace BnetConfig
                 read(json, "mech_attack_resume_scale", config.mechAttackResumeScale);
                 read(json, "combat_move_guard", config.combatMoveGuard);
                 read(json, "move_resend_tolerance_px", config.moveResendTolerancePx);
+                read(json, "print_build_info", config.printBuildInfo);
                 read(json, "bnet_log", config.bnetLog);
 
                 fromFile = true;
@@ -249,6 +250,7 @@ namespace BnetConfig
            << " mech_attack_resume_scale=" << config.mechAttackResumeScale
            << " combat_move_guard=" << config.combatMoveGuard
            << " move_resend_tolerance_px=" << config.moveResendTolerancePx
+           << " print_build_info=" << config.printBuildInfo
            << " bnet_log=" << config.bnetLog;
         return os.str();
     }

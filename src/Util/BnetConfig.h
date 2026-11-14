@@ -49,6 +49,7 @@ namespace BnetConfig
         int moveResendTolerancePx = 24;         // Targets within this distance of the last move target count as the same
 
         // Phase 3: Lightweight log
+        bool printBuildInfo = true;             // Local-only in-game message at game start: build id and config source
         bool bnetLog = true;                    // Write one-line summaries to bwapi-data/write/stardust_bnet.log
     };
 

@@ -173,12 +173,22 @@ Not changed: the arbiter condition (3 nexuses, 20+ army), carrier switch (disabl
 
 ## Phase 3: Build script and summary log
 
+### Build id at game start
+
+- CMake computes `STARDUST_BUILD_ID` at configure time as `<branch>@<8-char hash>`, with `-dirty` when tracked files have uncommitted changes (`unknown` without git). Override with `-DSTARDUST_BUILD_ID=...`. `scripts/build-bnet.ps1` reconfigures on every run, so the id follows the checked-out commit.
+- `print_build_info` (default `true`): at `onStart` the bot calls `Broodwar->printf` twice. This is a local screen message, not chat, so other players do not see it:
+  - `Stardust bnet build bnet-pluto@73d9b55d`
+  - `config: bwapi-data/AI/stardust_bnet.json | pluto_pvt_snipe=1 pvt_mech_fix=1 combat_move_guard=1` (or `config: defaults (stardust_bnet.json not found)`)
+- For the first 30 game seconds the same two lines are also drawn with `Broodwar->drawTextScreen` (debug drawing, at screen 8,30). `print_build_info=false` disables both.
+- The same id is the first field of the `[START]` log line (`build=...`). The message is independent of `BNET_LOG` / `bnet_log`.
+- Battle.net: the original bridge runtime only displays native `printf` text with a single-player text binding; otherwise it writes the text to its log (`Text written to bridge log; native display unavailable` in its strings). So on Battle.net the `printf` lines are expected in the bridge log, not on screen. The `drawTextScreen` lines go through the bridge's debug overlay window instead; whether the Battle.net candidate shows them is not verified.
+
 - `scripts/build-bnet.ps1`: configures with the generator of the newest Visual Studio 2022/2026 install that has the MSVC x86/x64 tools (`Visual Studio 17 2022` or `Visual Studio 18 2026`, override with `-Generator`; the CMake bundled with that Visual Studio is preferred and must list the generator), `-A Win32 -DTOURNAMENT_BUILD=ON` (which also skips the `windbg` target), builds only the `Stardust` target in Release, and copies `Stardust.dll` plus `config/stardust_bnet.json` to `dist/bwapi-data/AI/`. An existing `dist/.../stardust_bnet.json` is kept unless `-OverwriteConfig`; the defaults are always written to `stardust_bnet.default.json`. Options: `-Clean` (required when an existing build directory was configured with another generator), `-VsHuman`, `-NoBnetLog`, `-BuildDir`, `-DistDir`, `-Generator`.
 - CMake option `BNET_LOG` (default `ON`) compiles the summary log in, independent of `LOGGING_ENABLED` (which `TOURNAMENT_BUILD` turns off). Runtime switch: `bnet_log`.
 - Log file `bwapi-data/write/stardust_bnet.log`, appended, one line per event, flushed immediately:
 
 ```
-2026-11-15 21:03:11 f=0 t=0:00 [START] map="..." opponent="..." enemy_race=Terran latency_frames=6 battlenet=1 multiplayer=1 config=bwapi-data/AI/stardust_bnet.json safe_bnet_mining=1 ... observer_min_dragoons=2 natural_cannons=1 main_cannons=1 bio_attack_start_scale=0.7 bio_attack_continue_scale=1 bio_attack_resume_scale=0.7 bio_aggression_scale(legacy)=absent bnet_log=1
+2026-11-15 21:03:11 f=0 t=0:00 [START] build=bnet-pluto@73d9b55d map="..." opponent="..." enemy_race=Terran latency_frames=6 battlenet=1 multiplayer=1 config=bwapi-data/AI/stardust_bnet.json safe_bnet_mining=1 ... observer_min_dragoons=2 natural_cannons=1 main_cannons=1 bio_attack_start_scale=0.7 bio_attack_continue_scale=1 bio_attack_resume_scale=0.7 bio_aggression_scale(legacy)=absent bnet_log=1
 2026-11-15 21:03:11 f=0 t=0:00 [OURS] from=- to=EarlyGameDefense
 2026-11-15 21:04:40 f=2100 t=1:28 [EVENT] detection_stage from=Upstream to=Preventive mine=0 twofact_or_mech=0 vultures=0 vulture_or_shop=0 anti_marine_rush=0 timing=1 dragoons=2 observers=0
 2026-11-15 21:06:02 f=4100 t=2:52 [ENEMY] from=Unknown to=TwoFactory
