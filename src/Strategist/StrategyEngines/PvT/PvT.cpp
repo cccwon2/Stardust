@@ -8,6 +8,7 @@
 #include "Builder.h"
 #include "Opponent.h"
 #include "Strategist.h"
+#include "BnetConfig.h"
 
 #include "Plays/Macro/SaturateBases.h"
 #include "Plays/MainArmy/DefendMyMain.h"
@@ -51,6 +52,24 @@ void PvT::initialize(std::vector<std::shared_ptr<Play>> &plays, bool transitioni
         plays.emplace_back(std::make_shared<DefendMyMain>());
 
         std::string opening = openingOverride;
+
+        // Pluto snipe: skip per-opponent-name UCB1 and use a fixed safe opening, since Pluto changes its name every game
+        auto &bnetConfig = BnetConfig::get();
+        if (opening.empty() && bnetConfig.plutoPvtSnipe && !bnetConfig.forcedPvtOpening.empty())
+        {
+            if (bnetConfig.forcedPvtOpening == OurStrategyNames[OurStrategy::EarlyGameDefense] ||
+                bnetConfig.forcedPvtOpening == OurStrategyNames[OurStrategy::FastExpansion])
+            {
+                opening = bnetConfig.forcedPvtOpening;
+            }
+            else
+            {
+                Log::Get() << "Unknown forced_pvt_opening '" << bnetConfig.forcedPvtOpening << "', using EarlyGameDefense";
+                opening = OurStrategyNames[OurStrategy::EarlyGameDefense];
+            }
+            Log::Get() << "Pluto snipe: forced PvT opening " << opening << " (UCB1 skipped)";
+        }
+
         if (opening.empty())
         {
 #if VS_HUMAN
@@ -107,6 +126,7 @@ void PvT::updatePlays(std::vector<std::shared_ptr<Play>> &plays)
         ourStrategy = newStrategy;
         Opponent::addMyStrategyChange(OurStrategyNames[ourStrategy]);
     }
+    if (ourStrategy == OurStrategy::Defensive) plutoDefensiveUsed = true;
 
     bool defendOurMain;
     if (hasEnemyStolenOurGas())
@@ -237,6 +257,7 @@ void PvT::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
     reserveMineralsForExpansion(mineralReservations);
     handleNaturalExpansion(plays, prioritizedProductionGoals);
     handleDetection(plays, prioritizedProductionGoals);
+    handlePlutoNaturalCannons(prioritizedProductionGoals);
 
     if (handleIslandExpansionProduction(plays, prioritizedProductionGoals)) return;
 
@@ -282,6 +303,23 @@ void PvT::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
             }
 
             upgradeAtCount(prioritizedProductionGoals, BWAPI::UpgradeTypes::Leg_Enhancements, BWAPI::UnitTypes::Protoss_Zealot, 0);
+        }
+
+        // Pluto snipe: against bio, keep a steady speedlot share alongside dragoons (roughly 1 zealot per dragoon)
+        // and get leg enhancements early, since pure goons trade poorly into marine/medic
+        if (BnetConfig::get().plutoPvtSnipe &&
+            (enemyStrategy == TerranStrategy::MidGameBio || enemyStrategy == TerranStrategy::MarinePressure))
+        {
+            int desiredZealots = std::max(4, dragoonCount);
+            if (desiredZealots > zealotCount)
+            {
+                mainArmyProduction(prioritizedProductionGoals,
+                                   BWAPI::UnitTypes::Protoss_Zealot,
+                                   desiredZealots - zealotCount,
+                                   higherPriorityCount);
+            }
+
+            upgradeAtCount(prioritizedProductionGoals, BWAPI::UpgradeTypes::Leg_Enhancements, BWAPI::UnitTypes::Protoss_Zealot, 2);
         }
 
         mainArmyProduction(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Dragoon, -1, higherPriorityCount);
@@ -510,8 +548,13 @@ void PvT::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
             }
 
             // Against mech, build arbiters on three completed nexuses and a significant army size
+            // Pluto snipe: also continue into arbiters against bio / bio-mech so the tech transition isn't cut off
+            // (upstream only builds arbiters against mech; there is no high templar storm micro in Stardust)
             int arbiterCount = Units::countAll(BWAPI::UnitTypes::Protoss_Arbiter);
-            if (enemyStrategy == TerranStrategy::MidGameMech && arbiterCount < 2 && Units::countCompleted(BWAPI::UnitTypes::Protoss_Nexus) > 2
+            bool arbiterMatchup = enemyStrategy == TerranStrategy::MidGameMech ||
+                                  (BnetConfig::get().plutoPvtSnipe &&
+                                   (enemyStrategy == TerranStrategy::MidGameBio || enemyStrategy == TerranStrategy::MidGameBioMech));
+            if (arbiterMatchup && arbiterCount < 2 && Units::countCompleted(BWAPI::UnitTypes::Protoss_Nexus) > 2
                 && (zealotCount + dragoonCount) > 20)
             {
                 prioritizedProductionGoals[PRIORITY_NORMAL].emplace_back(std::in_place_type<UnitProductionGoal>,
@@ -723,6 +766,38 @@ void PvT::handleDetection(std::vector<std::shared_ptr<Play>> &plays, std::map<in
         return;
     }
 
+    // Pluto snipe: get robo -> observatory -> observer early instead of waiting for two bases.
+    // The producer adds the robotics facility and observatory prerequisites automatically.
+    auto &bnetConfig = BnetConfig::get();
+    if (bnetConfig.plutoPvtSnipe && bnetConfig.earlyObserverPriority)
+    {
+        // Immediately and at high priority when mines or vulture/mech play are seen
+        if (Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Vulture_Spider_Mine) ||
+            Players::hasResearched(BWAPI::Broodwar->enemy(), BWAPI::TechTypes::Spider_Mines) ||
+            enemyStrategy == TerranStrategy::TwoFactory ||
+            enemyStrategy == TerranStrategy::MidGameMech ||
+            enemyStrategy == TerranStrategy::MidGameBioMech ||
+            Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Vulture) ||
+            Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Machine_Shop))
+        {
+            buildObserver(PRIORITY_SPECIALTEAMS);
+            return;
+        }
+
+        // Don't divert gas from goons while we are holding an early rush
+        if (ourStrategy == OurStrategy::AntiMarineRush) return;
+
+        // Otherwise get the first observers after dragoon range has started, at normal priority
+        if (currentFrame > 6500 || Players::upgradeLevel(BWAPI::Broodwar->self(), BWAPI::UpgradeTypes::Singularity_Charge) > 0 ||
+            BWAPI::Broodwar->self()->isUpgrading(BWAPI::UpgradeTypes::Singularity_Charge))
+        {
+            buildObserver(PRIORITY_NORMAL);
+            return;
+        }
+
+        return;
+    }
+
     // In all other cases, wait until we are on two bases
     if (Units::countCompleted(BWAPI::UnitTypes::Protoss_Nexus) < 2) return;
 
@@ -747,5 +822,68 @@ void PvT::handleDetection(std::vector<std::shared_ptr<Play>> &plays, std::map<in
     {
         buildObserver();
         return;
+    }
+}
+
+void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &prioritizedProductionGoals)
+{
+    // Pluto snipe: once our natural is taken, guarantee 1-2 cannons in its mineral line against vulture / drop harass,
+    // and one in the main mineral line when the enemy is on vultures / mech
+    auto &bnetConfig = BnetConfig::get();
+    if (!bnetConfig.plutoPvtSnipe || bnetConfig.naturalCannons <= 0) return;
+    if (ourStrategy == OurStrategy::ForgeExpandGoons) return; // Handled by the FFE play
+
+    auto natural = Map::getMyNatural();
+    if (!natural || natural->owner != BWAPI::Broodwar->self()) return;
+    if (!natural->resourceDepot || !natural->resourceDepot->completed) return;
+    // Note: the producer adds the forge prerequisite when a cannon goal is queued
+
+    auto buildCannonsAtBase = [&](Base *base, int count)
+    {
+        if (!base || count <= 0) return;
+        if (!base->resourceDepot || !base->resourceDepot->completed) return;
+
+        auto &locations = BuildingPlacement::baseStaticDefenseLocations(base);
+        if (!locations.isValid()) return;
+
+        auto buildAtTile = [&](BWAPI::TilePosition tile, BWAPI::UnitType type, int framesUntilPowered)
+        {
+            if (Units::myBuildingAt(tile) != nullptr) return;
+            if (Builder::isPendingHere(tile)) return;
+
+            auto buildLocation = BuildingPlacement::BuildLocation(Block::Location(tile),
+                                                                  BuildingPlacement::builderFrames(base->getPosition(), tile, type),
+                                                                  framesUntilPowered,
+                                                                  0);
+            prioritizedProductionGoals[PRIORITY_NORMAL].emplace_back(std::in_place_type<UnitProductionGoal>,
+                                                                     "SE-pluto-cannon",
+                                                                     type,
+                                                                     buildLocation);
+        };
+
+        auto pylon = Units::myBuildingAt(locations.powerPylon);
+        if (!pylon)
+        {
+            buildAtTile(locations.powerPylon, BWAPI::UnitTypes::Protoss_Pylon, 0);
+            return;
+        }
+
+        int framesUntilPowered = pylon->completed ? 0 : std::max(0, pylon->estimatedCompletionFrame - currentFrame);
+        for (const auto &location : locations.workerDefenseCannons)
+        {
+            if (count < 1) break;
+            count--;
+            buildAtTile(location, BWAPI::UnitTypes::Protoss_Photon_Cannon, framesUntilPowered);
+        }
+    };
+
+    buildCannonsAtBase(natural, bnetConfig.naturalCannons);
+
+    if (enemyStrategy == TerranStrategy::TwoFactory ||
+        enemyStrategy == TerranStrategy::MidGameMech ||
+        enemyStrategy == TerranStrategy::MidGameBioMech ||
+        Units::countEnemy(BWAPI::UnitTypes::Terran_Vulture) > 2)
+    {
+        buildCannonsAtBase(Map::getMyMain(), 1);
     }
 }

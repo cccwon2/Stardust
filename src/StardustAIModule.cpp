@@ -1,4 +1,6 @@
 #include "StardustAIModule.h"
+#include "BnetConfig.h"
+#include "BnetLog.h"
 
 #include "Timer.h"
 #include "Map.h"
@@ -73,6 +75,7 @@ void StardustAIModule::onStart()
 
     // Initialize globals that just need to make sure their global data is reset
     Log::initialize();
+    BnetConfig::initialize();
     Builder::initialize();
     Opponent::initialize();
     General::initialize();
@@ -84,6 +87,9 @@ void StardustAIModule::onStart()
     PathFinding::initializeSearch();
     Producer::initialize();
     PerformanceManager::initialize();
+
+    // Battle.net summary log: start line (map, latency, active JSON options); must be before strategy initialization
+    BnetLog::gameStart();
 
     Log::SetDebug(true);
     CherryVis::initialize();
@@ -125,6 +131,7 @@ void StardustAIModule::onStart()
 
     Log::Get() << "Initialized game against " << Opponent::getName()
                << " on " << BWAPI::Broodwar->mapFileName() << " (" << BWAPI::Broodwar->mapHash() << ")";
+    Log::Get() << "Battle.net config: " << BnetConfig::summary();
     Log::Get() << "My starting position: " << Map::getMyMain()->getTilePosition();
     if (Map::getMyNatural())
     {
@@ -154,6 +161,7 @@ void StardustAIModule::onEnd(bool isWinner)
     WorkerMiningInstrumentation::writeGameEndInstrumentation();
 #endif
 
+    BnetLog::gameEnd(isWinner);
     Opponent::gameEnd(isWinner);
     WORKERGATHEROPTIMIZER::gameEnd();
     CherryVis::gameEnd();
@@ -184,6 +192,8 @@ void StardustAIModule::onFrame()
     }
 #endif
 
+    BnetLog::onFrame();
+
     Timer::start("Frame");
     PerformanceManager::frameStart();
 
@@ -194,6 +204,7 @@ void StardustAIModule::onFrame()
             && currentFrame > 100)
         {
             Log::Get() << "Opponent has left the game";
+            BnetLog::event("opponent_left");
             gameFinished = true;
             return;
         }
@@ -295,7 +306,9 @@ void StardustAIModule::onFrame()
     Timer::checkpoint("PathFinding::updateGrids");
 
     // Surrender logic
-    if (enableSurrender)
+    // Surrender is controlled at runtime by enable_auto_gg in stardust_bnet.json (default off);
+    // enableSurrender remains as a programmatic override for tests
+    if (enableSurrender || BnetConfig::get().enableAutoGG)
     {
         // Surrender if the following is true:
         // - We have no workers left and no money / depot to create a new one
@@ -331,6 +344,7 @@ void StardustAIModule::onFrame()
                 if (enemyInBase)
                 {
                     Log::Get() << "Surrendering";
+                    BnetLog::event("surrender");
                     BWAPI::Broodwar->sendText("gg");
                     gameFinished = true;
                     BWAPI::Broodwar->leaveGame();

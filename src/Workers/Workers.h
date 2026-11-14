@@ -16,6 +16,9 @@ namespace Workers
 
     void issueOrders();
 
+    // Number of stuck gathering workers force-reassigned this game (Battle.net stacked mineral fallback)
+    int bnetStuckReassignments();
+
     // Whether the given worker unit can currently be reassigned to non-gathering duties
     bool isAvailableForReassignment(const MyWorker &unit, bool allowCarryMinerals, bool allowMining);
 

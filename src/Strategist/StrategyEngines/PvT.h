@@ -73,6 +73,9 @@ public:
 private:
     int enemyStrategyChanged;
 
+    // Pluto snipe: whether we have already used the Defensive strategy this game (prevents Normal <-> Defensive oscillation)
+    bool plutoDefensiveUsed = false;
+
     TerranStrategy recognizeEnemyStrategy();
 
     OurStrategy chooseOurStrategy(TerranStrategy newEnemyStrategy, std::vector<std::shared_ptr<Play>> &plays);
@@ -82,4 +85,6 @@ private:
     void handleUpgrades(std::map<int, std::vector<ProductionGoal>> &prioritizedProductionGoals);
 
     void handleDetection(std::vector<std::shared_ptr<Play>> &plays, std::map<int, std::vector<ProductionGoal>> &prioritizedProductionGoals);
+
+    void handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &prioritizedProductionGoals);
 };

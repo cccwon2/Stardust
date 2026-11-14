@@ -11,3 +11,7 @@ cmake-build-relwithdebinfo
 msvc
 out
 CMakeSettings.json
+
+# Battle.net build script output
+build-bnet/
+dist/

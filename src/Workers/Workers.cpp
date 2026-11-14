@@ -8,6 +8,7 @@
 #include "WorkerGatherOptimizer.h"
 #include "Boids.h"
 #include "Strategist.h"
+#include "BnetConfig.h"
 
 #include "DebugFlag_UnitOrders.h"
 #include "MiningOptimizationV2/DataModel/MapData.h"
@@ -171,6 +172,132 @@ namespace Workers
 
         std::map<MyWorker, InitialWorkerState> initialSplitState;
 
+        // Battle.net safe mining / stuck worker fallback state
+        struct StuckWorkerState
+        {
+            BWAPI::Position position = BWAPI::Positions::Invalid;
+            bool carrying = false;
+            int sinceFrame = 0;
+        };
+        std::map<MyWorker, StuckWorkerState> stuckWorkerState;
+        std::set<MyWorker> simpleGatherWorkers;       // Workers forced into simple gather mode after being detected as stuck
+        std::map<Base *, bool> stackedMineralBases;   // Cache: whether a base has stacked / overlapping mineral patches
+        int stuckReassignments = 0;
+
+        // Whether a base has mineral patches on the same tile or overlapping each other (fast-infinite / modified melee maps)
+        bool hasStackedMinerals(Base *base)
+        {
+            if (!base) return false;
+
+            auto it = stackedMineralBases.find(base);
+            if (it != stackedMineralBases.end()) return it->second;
+
+            bool stacked = false;
+            auto &patches = base->mineralPatches();
+            for (size_t i = 0; i < patches.size() && !stacked; i++)
+            {
+                for (size_t j = i + 1; j < patches.size(); j++)
+                {
+                    // Normal adjacent patches have centers at least 32 pixels apart on one axis
+                    if (patches[i]->tile == patches[j]->tile ||
+                        patches[i]->center.getApproxDistance(patches[j]->center) < 24)
+                    {
+                        stacked = true;
+                        break;
+                    }
+                }
+            }
+
+            stackedMineralBases[base] = stacked;
+            if (stacked)
+            {
+                Log::Get() << "Stacked minerals detected at base @ " << base->getTilePosition() << "; using simple gather mode";
+            }
+            return stacked;
+        }
+
+        // Whether the given worker should bypass the mining optimizer and use plain gather()
+        bool useSimpleGather(const MyWorker &worker, Base *base)
+        {
+            auto &config = BnetConfig::get();
+            if (config.safeBnetMining) return true;
+            if (!config.stackedMineralFallback) return false;
+            if (simpleGatherWorkers.contains(worker)) return true;
+            return hasStackedMinerals(base);
+        }
+
+        // Tracks whether a gathering worker has made no progress (position / cargo) for too long.
+        // Returns true if the worker should be considered stuck.
+        bool isStuckGatheringWorker(const MyWorker &worker)
+        {
+            auto &state = stuckWorkerState[worker];
+            auto order = worker->bwapiUnit->getOrder();
+            bool carrying = worker->bwapiUnit->isCarryingMinerals();
+            auto position = worker->bwapiUnit->getPosition();
+
+            // Mining itself legitimately takes ~80 frames standing still, and only gathering states are monitored
+            bool monitored = worker->bwapiUnit->isGatheringMinerals() && order != BWAPI::Orders::MiningMinerals;
+            if (!monitored || !state.position.isValid() || carrying != state.carrying ||
+                position.getApproxDistance(state.position) > 2)
+            {
+                state.position = position;
+                state.carrying = carrying;
+                state.sinceFrame = currentFrame;
+                return false;
+            }
+
+            // Waiting at a patch occupied by another worker can legitimately last a full mining cycle, so allow double
+            int threshold = BnetConfig::get().stuckWorkerFrames;
+            if (order == BWAPI::Orders::WaitForMinerals) threshold *= 2;
+            return (currentFrame - state.sinceFrame) >= threshold;
+        }
+
+        // Moves a stuck worker to a different mineral patch at the same base and switches it to simple gather mode
+        bool reassignStuckWorker(const MyWorker &worker, Base *base)
+        {
+            if (!base) return false;
+            auto current = workerMineralPatch[worker];
+
+            Resource best = nullptr;
+            size_t bestWorkers = SIZE_MAX;
+            int bestDist = INT_MAX;
+            for (const auto &patch : base->mineralPatches())
+            {
+                if (patch == current || patch->destroyed) continue;
+                if (!patch->getBwapiUnitIfVisible()) continue;
+
+                size_t workers = mineralPatchWorkers[patch].size();
+                int dist = patch->getDistance(worker);
+                if (workers < bestWorkers || (workers == bestWorkers && dist < bestDist))
+                {
+                    best = patch;
+                    bestWorkers = workers;
+                    bestDist = dist;
+                }
+            }
+
+            stuckWorkerState.erase(worker);
+            simpleGatherWorkers.insert(worker);
+            stuckReassignments++;
+
+            if (!best)
+            {
+                // No alternative patch: just reissue a plain gather to the current one
+                auto bwapiPatch = current ? current->getBwapiUnitIfVisible() : nullptr;
+                if (bwapiPatch) worker->gather(bwapiPatch);
+                Log::Get() << "Stuck worker " << *worker << " has no alternative patch; reissued plain gather";
+                return true;
+            }
+
+            if (current) mineralPatchWorkers[current].erase(worker);
+            workerMineralPatch[worker] = best;
+            mineralPatchWorkers[best].insert(worker);
+
+            Log::Get() << "Stuck worker " << *worker << " reassigned to " << *best << " (simple gather mode)";
+            worker->gather(best->getBwapiUnitIfVisible());
+            return true;
+        }
+
         int mineralWorkerCount;
         std::pair<int, int> gasWorkerCount;
 
@@ -216,6 +343,8 @@ namespace Workers
         void workerLost(const MyWorker &unit)
         {
             workerJob.erase(unit);
+            stuckWorkerState.erase(unit);
+            simpleGatherWorkers.erase(unit);
             removeFromResource(unit, workerMineralPatch, mineralPatchWorkers);
             removeFromResource(unit, workerRefinery, refineryWorkers);
         }
@@ -255,6 +384,14 @@ namespace Workers
 
         void assignInitialMineralWorkers()
         {
+            // In safe Battle.net mining mode, skip the optimized initial split (and its frame-exact resends) entirely;
+            // the normal assignment loop assigns each worker to the nearest free patch on this frame
+            if (BnetConfig::get().safeBnetMining)
+            {
+                Log::Get() << "Safe Battle.net mining: skipping optimized initial worker split";
+                return;
+            }
+
             // Run the optimizer to get the initial split, which maps each worker to the first two patches they should mine
             auto assignments = WORKERGATHEROPTIMIZER::initialWorkerSplit();
 
@@ -546,6 +683,15 @@ namespace Workers
         workerRefinery.clear();
         refineryWorkers.clear();
         initialSplitState.clear();
+        stuckWorkerState.clear();
+        simpleGatherWorkers.clear();
+        stackedMineralBases.clear();
+        stuckReassignments = 0;
+    }
+
+    int bnetStuckReassignments()
+    {
+        return stuckReassignments;
     }
 
     void onUnitDestroy(const Unit &unit)
@@ -812,15 +958,29 @@ namespace Workers
 
                     auto mineralPatch = workerMineralPatch[worker];
 
+                    // Battle.net: decide whether this worker bypasses the mining optimizer
+                    bool simpleGather = useSimpleGather(worker, base);
+
+                    // Stuck / stacked mineral fallback: force reassignment when a gathering worker makes no progress
+                    if (mineralPatch && BnetConfig::get().stackedMineralFallback && isStuckGatheringWorker(worker))
+                    {
+                        if (reassignStuckWorker(worker, base)) continue;
+                    }
+
                     // If the worker has cargo, return it
                     if (worker->bwapiUnit->isCarryingMinerals() || worker->bwapiUnit->isCarryingGas())
                     {
                         // If the worker is in a narrow choke, use the return cargo command to ensure it doesn't get stuck on other units
                         if (Map::isInNarrowChoke(worker->getTilePosition()))
                         {
+                            // NOTE: the original condition (lastCommandFrame > currentFrame - LF) only resends when a command was
+                            // issued very recently, which looks inverted; simple gather mode uses the conservative form instead
+                            bool resend = simpleGather
+                                          ? worker->lastCommandFrame < (currentFrame - BWAPI::Broodwar->getLatencyFrames() - 1)
+                                          : worker->lastCommandFrame > (currentFrame - BWAPI::Broodwar->getLatencyFrames());
                             if (worker->bwapiUnit->getOrder() != BWAPI::Orders::ReturnMinerals &&
                                              worker->bwapiUnit->getOrder() != BWAPI::Orders::ReturnGas &&
-                                             worker->lastCommandFrame > (currentFrame - BWAPI::Broodwar->getLatencyFrames()))
+                                             resend)
                             {
                                 worker->returnCargo();
                             }
@@ -870,7 +1030,7 @@ namespace Workers
                                     {
                                         worker->rightClick(closestBase->resourceDepot->bwapiUnit);
                                     }
-                                    else if (worker->bwapiUnit->isCarryingMinerals())
+                                    else if (worker->bwapiUnit->isCarryingMinerals() && !simpleGather)
                                     {
                                         auto myDepot = std::dynamic_pointer_cast<MyUnitImpl>(closestBase->resourceDepot);
                                         if (myDepot)
@@ -900,7 +1060,7 @@ namespace Workers
                             worker->bwapiUnit->getOrder() == BWAPI::Orders::ResetCollision)
                         {
                             auto myDepot = std::dynamic_pointer_cast<MyUnitImpl>(base->resourceDepot);
-                            if (myDepot && mineralPatch)
+                            if (myDepot && mineralPatch && !simpleGather)
                             {
                                 WORKERGATHEROPTIMIZER::optimizeReturnOfResource(worker, myDepot, mineralPatch);
                             }
@@ -936,6 +1096,19 @@ namespace Workers
                         if (!bwapiUnit)
                         {
                             worker->moveTo(mineralPatch->center);
+                            continue;
+                        }
+
+                        // Simple (Battle.net safe) gather: never optimize or resend; only issue a plain gather when the worker
+                        // isn't already heading to / waiting at minerals
+                        if (simpleGather)
+                        {
+                            auto order = worker->bwapiUnit->getOrder();
+                            if (order == BWAPI::Orders::MoveToMinerals || order == BWAPI::Orders::WaitForMinerals)
+                            {
+                                continue;
+                            }
+                            worker->gather(bwapiUnit);
                             continue;
                         }
 

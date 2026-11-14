@@ -50,6 +50,11 @@ IF (VS_HUMAN)
     target_compile_definitions(Stardust PUBLIC VS_HUMAN=true)
 ENDIF (VS_HUMAN)
 
+# Battle.net summary log is independent of LOGGING_ENABLED, so it also works in TOURNAMENT_BUILD
+IF (BNET_LOG)
+    target_compile_definitions(Stardust PUBLIC BNET_LOG_ENABLED=1)
+ENDIF (BNET_LOG)
+
 target_compile_definitions(Stardust PUBLIC $<$<CONFIG:Release>:FRAME_TIME_LIMIT_ENABLED=true>)
 
 if (CMAKE_BUILD_TYPE MATCHES Debug)
