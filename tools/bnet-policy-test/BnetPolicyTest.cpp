@@ -197,6 +197,45 @@ namespace
         d.enabled = false;
         CHECK(decideDetection(d) == DetectionStage::Upstream);
     }
+
+    bool near(double a, double b) { return a - b < 1e-9 && b - a < 1e-9; }
+
+    void testBioScales()
+    {
+        // No keys
+        BioScaleKeys k;
+        auto r = resolveBioScales(k);
+        CHECK(near(r.start, 0.7) && near(r.cont, 1.0) && near(r.resume, 0.7));
+
+        // Legacy key only: start/resume take it, continue stays 1.0 (never the legacy 0.7)
+        k = BioScaleKeys();
+        k.hasLegacy = true;
+        k.legacy = 0.7;
+        r = resolveBioScales(k);
+        CHECK(near(r.start, 0.7) && near(r.cont, 1.0) && near(r.resume, 0.7));
+        k.legacy = 0.5;
+        r = resolveBioScales(k);
+        CHECK(near(r.start, 0.5) && near(r.cont, 1.0) && near(r.resume, 0.5));
+
+        // Legacy + some new keys: new keys win, missing start/resume fall back to legacy, continue to 1.0
+        k.hasStart = true;
+        k.start = 0.8;
+        r = resolveBioScales(k);
+        CHECK(near(r.start, 0.8) && near(r.cont, 1.0) && near(r.resume, 0.5));
+        k.hasContinue = true;
+        k.cont = 0.9;
+        k.hasResume = true;
+        k.resume = 0.6;
+        r = resolveBioScales(k);
+        CHECK(near(r.start, 0.8) && near(r.cont, 0.9) && near(r.resume, 0.6));
+
+        // Upstream-equivalent configuration
+        k = BioScaleKeys();
+        k.hasStart = k.hasContinue = k.hasResume = true;
+        k.start = k.cont = k.resume = 1.0;
+        r = resolveBioScales(k);
+        CHECK(near(r.start, 1.0) && near(r.cont, 1.0) && near(r.resume, 1.0));
+    }
 }
 
 int main()
@@ -204,6 +243,7 @@ int main()
     testStuck();
     testRecoveryCooldown();
     testDetection();
+    testBioScales();
 
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

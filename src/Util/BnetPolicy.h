@@ -148,4 +148,45 @@ namespace BnetPolicy
     {
         return stage == DetectionStage::Urgent || stage == DetectionStage::Elevated;
     }
+    // ---------------------------------------------------------------------------------------------
+    // MidGameBio attack aggression scales (AttackBaseSquad)
+    // ---------------------------------------------------------------------------------------------
+
+    struct BioScaleKeys
+    {
+        bool hasLegacy = false;     // bio_aggression_scale (pre-split key)
+        double legacy = 0.7;
+        bool hasStart = false;      // bio_attack_start_scale
+        double start = 0.7;
+        bool hasContinue = false;   // bio_attack_continue_scale
+        double cont = 1.0;
+        bool hasResume = false;     // bio_attack_resume_scale
+        double resume = 0.7;
+    };
+
+    struct BioScales
+    {
+        double start;
+        double cont;
+        double resume;
+    };
+
+    constexpr double defaultBioStartScale = 0.7;
+    constexpr double defaultBioContinueScale = 1.0;
+    constexpr double defaultBioResumeScale = 0.7;
+
+    // Compatibility policy:
+    // - No keys: start 0.7, continue 1.0, resume 0.7.
+    // - Only legacy bio_aggression_scale=X: start X, resume X, continue 1.0 (the legacy key no longer affects continue).
+    // - New keys present: each new key wins; missing start/resume fall back to the legacy key, then the default;
+    //   missing continue is always 1.0 (never the legacy value).
+    inline BioScales resolveBioScales(const BioScaleKeys &keys)
+    {
+        double legacyOrStart = keys.hasLegacy ? keys.legacy : defaultBioStartScale;
+        double legacyOrResume = keys.hasLegacy ? keys.legacy : defaultBioResumeScale;
+        return BioScales{
+                keys.hasStart ? keys.start : legacyOrStart,
+                keys.hasContinue ? keys.cont : defaultBioContinueScale,
+                keys.hasResume ? keys.resume : legacyOrResume};
+    }
 }

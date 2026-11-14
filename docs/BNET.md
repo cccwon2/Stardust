@@ -74,7 +74,10 @@ Limitation: follow-up waypoint moves issued later by the pathing code (`MyUnitIm
 | `early_observer_priority` | `true` | Staged request for the first observer (the producer adds robo + observatory at the same priority). See "First observer policy" below. `false` (or `pluto_pvt_snipe=false`) restores upstream detection. |
 | `observer_min_dragoons` | `2` | Completed dragoons required before a two-factory / mech / 3+ vulture observer request is raised to high priority (0-12). Below it the request stays at normal priority (below dragoon base production) instead of being dropped. Initial value only, not validated in real games. |
 | `natural_cannons` | `1` | Once our natural nexus is complete, guarantee this many cannons (0-2) in the natural mineral line, plus 1 in the main mineral line against `TwoFactory` / mech / 3+ vultures. |
-| `bio_aggression_scale` | `0.7` | Multiplies attack aggression in `AttackBaseSquad` (start and continue attack) when the enemy is recognized as `MidGameBio`. Lower = more regrouping, fewer trickle attacks (0.1-2.0). |
+| `bio_attack_start_scale` | `0.7` | Multiplier in `shouldStartAttack` (moving -> attacking) vs. `MidGameBio` (0.1-2.0). |
+| `bio_attack_continue_scale` | `1.0` | Multiplier in `shouldContinueAttack` (attacking -> regrouping). `1.0` keeps upstream continue decisions. |
+| `bio_attack_resume_scale` | `0.7` | Multiplier in `shouldStopRegrouping` (regrouping -> attacking). |
+| `bio_aggression_scale` | (legacy) | Pre-split key. Now applies to start and resume only, never to continue. See compatibility below. |
 
 ### First observer policy
 
@@ -92,6 +95,35 @@ two observers are with the main army). Once one exists, or when no row below app
 
 Mines are cloaked, so the main army also requests detection reactively through `updateDetectionNeeds()` (unchanged).
 Exactly one observer goal is added per frame; production goals are rebuilt every frame, so nothing accumulates.
+
+### MidGameBio aggression
+
+Only when `pluto_pvt_snipe` is on, the enemy is Terran and the recognized enemy strategy is `MidGameBio`. Each scale is
+applied after the reinforcement adjustment and before the "pushed back to our natural" bonus; stability rules (6 frames
+before aborting, 12 frames before resuming, recent-result voting, reinforcement link-up wait) are unchanged.
+
+| Decision | Upstream base aggression | Final aggression passed to `shouldAttack` |
+| --- | --- | --- |
+| Start (`shouldStartAttack`) | `reinforcementFactor` (<= 1.0) | `reinforcementFactor * start_scale * naturalBonus` |
+| Continue (`shouldContinueAttack`) | `1.2` (+0.005 per supply above 300 if no reinforcements) | `base * continue_scale * naturalBonus` |
+| Resume (`shouldStopRegrouping`) | `0.8` minus choke penalty, `1.2` after `ContainChoke`, `1.0` in `StandGround` | `base * reinforcementFactor * resume_scale * naturalBonus(x2 within 500)` |
+
+Note `shouldAttack` has an extra "kill 50% more value than we lose" branch only when aggression > 0.99. With
+start/resume at 0.7 that branch is disabled for start and resume unless the natural bonus applies; continue at 1.0 keeps it
+(1.2). Example with defaults: start 1.0 -> 0.7, continue 1.2 -> 1.2, resume 0.8 -> 0.56 (`StandGround` 1.0 -> 0.7).
+
+Compatibility (`bio_aggression_scale` = legacy key):
+
+| File contents | start | continue | resume |
+| --- | --- | --- | --- |
+| No bio keys | 0.7 | 1.0 | 0.7 |
+| Legacy only (`X`) | X | 1.0 | X |
+| New keys (any) | new key, else legacy, else 0.7 | new key, else 1.0 | new key, else legacy, else 0.7 |
+
+Upstream behavior: set all three new keys to `1.0` (or `pluto_pvt_snipe=false`). START logs the effective values and
+`bio_aggression_scale(legacy)=X(start/resume only)` or `absent`.
+
+These values are starting points; static checks do not show fewer attack/retreat oscillations or a higher win rate.
 
 Recognizer changes (`PvTEnemyStrategyRecognizer.cpp`, only when `pluto_pvt_snipe` is on):
 

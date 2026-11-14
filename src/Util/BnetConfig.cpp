@@ -1,4 +1,5 @@
 #include "BnetConfig.h"
+#include "BnetPolicy.h"
 
 #include <BWAPI.h>
 #include <nlohmann/json.hpp>
@@ -34,6 +35,23 @@ namespace BnetConfig
             catch (...)
             {
                 // Wrong type: keep the default
+            }
+        }
+
+        // Like read, but reports whether a valid value was present
+        template<typename T>
+        bool readPresent(const nlohmann::json &json, const char *key, T &target)
+        {
+            auto it = json.find(key);
+            if (it == json.end() || it->is_null()) return false;
+            try
+            {
+                target = it->get<T>();
+                return true;
+            }
+            catch (...)
+            {
+                return false;
             }
         }
     }
@@ -119,7 +137,17 @@ namespace BnetConfig
                 read(json, "early_observer_priority", config.earlyObserverPriority);
                 read(json, "observer_min_dragoons", config.observerMinDragoons);
                 read(json, "natural_cannons", config.naturalCannons);
-                read(json, "bio_aggression_scale", config.bioAggressionScale);
+                BnetPolicy::BioScaleKeys bioKeys;
+                bioKeys.hasLegacy = readPresent(json, "bio_aggression_scale", bioKeys.legacy);
+                bioKeys.hasStart = readPresent(json, "bio_attack_start_scale", bioKeys.start);
+                bioKeys.hasContinue = readPresent(json, "bio_attack_continue_scale", bioKeys.cont);
+                bioKeys.hasResume = readPresent(json, "bio_attack_resume_scale", bioKeys.resume);
+                auto bioScales = BnetPolicy::resolveBioScales(bioKeys);
+                config.bioAttackStartScale = bioScales.start;
+                config.bioAttackContinueScale = bioScales.cont;
+                config.bioAttackResumeScale = bioScales.resume;
+                config.bioLegacyKeyPresent = bioKeys.hasLegacy;
+                config.bioLegacyScale = bioKeys.legacy;
                 read(json, "bnet_log", config.bnetLog);
 
                 fromFile = true;
@@ -139,7 +167,9 @@ namespace BnetConfig
         config.minCommandIntervalFrames = std::clamp(config.minCommandIntervalFrames, -1, 48);
         config.naturalCannons = std::clamp(config.naturalCannons, 0, 2);
         config.observerMinDragoons = std::clamp(config.observerMinDragoons, 0, 12);
-        config.bioAggressionScale = std::clamp(config.bioAggressionScale, 0.1, 2.0);
+        config.bioAttackStartScale = std::clamp(config.bioAttackStartScale, 0.1, 2.0);
+        config.bioAttackContinueScale = std::clamp(config.bioAttackContinueScale, 0.1, 2.0);
+        config.bioAttackResumeScale = std::clamp(config.bioAttackResumeScale, 0.1, 2.0);
     }
 
     const Config &get()
@@ -174,7 +204,13 @@ namespace BnetConfig
            << " early_observer_priority=" << config.earlyObserverPriority
            << " observer_min_dragoons=" << config.observerMinDragoons
            << " natural_cannons=" << config.naturalCannons
-           << " bio_aggression_scale=" << config.bioAggressionScale
+           << " bio_attack_start_scale=" << config.bioAttackStartScale
+           << " bio_attack_continue_scale=" << config.bioAttackContinueScale
+           << " bio_attack_resume_scale=" << config.bioAttackResumeScale
+           << " bio_aggression_scale(legacy)=";
+        if (config.bioLegacyKeyPresent) os << config.bioLegacyScale << "(start/resume only)";
+        else os << "absent";
+        os
            << " bnet_log=" << config.bnetLog;
         return os.str();
     }

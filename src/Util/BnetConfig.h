@@ -24,7 +24,13 @@ namespace BnetConfig
         bool earlyObserverPriority = true;      // Staged first-observer requests (urgent / elevated / preventive), see BnetPolicy
         int observerMinDragoons = 2;            // Completed dragoons before a two-factory / many-vulture observer gets high priority
         int naturalCannons = 1;                 // Cannons to guarantee at the natural once it is taken (0-2)
-        double bioAggressionScale = 0.7;        // Multiplier applied to attack aggression vs. MidGameBio (lower = more conservative)
+        // Aggression multipliers vs. a recognized MidGameBio Terran (AttackBaseSquad), per decision state.
+        // Effective values after the compatibility policy in BnetPolicy::resolveBioScales.
+        double bioAttackStartScale = 0.7;       // shouldStartAttack (moving -> attacking)
+        double bioAttackContinueScale = 1.0;    // shouldContinueAttack (attacking -> regrouping); 1.0 = upstream
+        double bioAttackResumeScale = 0.7;      // shouldStopRegrouping (regrouping -> attacking)
+        bool bioLegacyKeyPresent = false;       // bio_aggression_scale was present in the file (applies to start / resume only)
+        double bioLegacyScale = 0.7;
 
         // Phase 3: Lightweight log
         bool bnetLog = true;                    // Write one-line summaries to bwapi-data/write/stardust_bnet.log

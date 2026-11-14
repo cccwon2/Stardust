@@ -12,7 +12,9 @@
   "early_observer_priority": true,
   "observer_min_dragoons": 2,
   "natural_cannons": 1,
-  "bio_aggression_scale": 0.7,
+  "bio_attack_start_scale": 0.7,
+  "bio_attack_continue_scale": 1.0,
+  "bio_attack_resume_scale": 0.7,
 
   "bnet_log": true
 }
