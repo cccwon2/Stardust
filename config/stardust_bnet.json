@@ -17,5 +17,17 @@
   "bio_attack_continue_scale": 1.0,
   "bio_attack_resume_scale": 0.7,
 
+  "pvt_mech_fix": true,
+  "mech_workers_per_army_unit": 4,
+  "mech_zealot_ratio": 0.5,
+  "mech_expand_army_per_base": 6,
+  "mech_luxury_upgrade_min_army": 20,
+  "mech_attack_start_scale": 0.7,
+  "mech_attack_continue_scale": 1.0,
+  "mech_attack_resume_scale": 0.7,
+
+  "combat_move_guard": true,
+  "move_resend_tolerance_px": 24,
+
   "bnet_log": true
 }

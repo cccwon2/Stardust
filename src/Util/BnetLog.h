@@ -44,4 +44,18 @@ namespace BnetLog
 
     // MidGameBio attack-state decisions in AttackBaseSquad (counted only when the bio scales are active)
     void bioDecision(bool wasAttacking, bool nowAttacking);
+
+    // MidGameMech attack-state decisions in AttackBaseSquad (counted only when the mech scales are active)
+    void mechDecision(bool wasAttacking, bool nowAttacking);
+
+    // Our own command counter. BWAPI's getAPM() returns 0 on Remastered, so every frame MyUnitImpl::update counts the
+    // units that were issued an order on the previous frame (one order per unit per frame, as enforced by MyUnit).
+    enum class OrderCategory { Worker, Observer, Army };
+    void countIssuedOrder(OrderCategory category);
+
+    // Non-worker moves skipped by the repeated move guard (combat_move_guard)
+    void moveSkipped();
+
+    // PvT mech expansion gate state change (logged as an [EVENT] line only when the state changes)
+    void mechExpandGate(bool blocked, int bases, int armyUnits, int required);
 }

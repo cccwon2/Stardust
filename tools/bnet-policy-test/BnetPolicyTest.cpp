@@ -276,6 +276,54 @@ namespace
     }
 }
 
+namespace
+{
+    void testMech()
+    {
+        // Army baseline: upstream divisor 6 vs. mech default 4
+        CHECK(armyBaselineUnits(48, 6) == 8);
+        CHECK(armyBaselineUnits(48, 4) == 12);
+        CHECK(armyBaselineUnits(0, 4) == 0);
+        CHECK(armyBaselineUnits(48, 0) == 0);
+
+        // Zealot target: min(ratio * dragoons, 2 * tanks)
+        CHECK(mechZealotTarget(12, 10, 0.5) == 6);
+        CHECK(mechZealotTarget(12, 2, 0.5) == 4);
+        CHECK(mechZealotTarget(12, 10, 0.0) == 0);
+        CHECK(mechZealotTarget(3, 10, 0.5) == 1);
+        CHECK(mechZealotTarget(-1, 10, 0.5) == 0);
+
+        // Expansion gate: bases 1-2 never gated, 3+ need perBase * bases
+        CHECK(mechExpansionAllowed(2, 0, 6));
+        CHECK(!mechExpansionAllowed(3, 17, 6));
+        CHECK(mechExpansionAllowed(3, 18, 6));
+        CHECK(!mechExpansionAllowed(4, 23, 6));
+        CHECK(mechExpansionAllowed(4, 0, 0));    // disabled
+
+        CHECK(!mechLuxuryUpgradeAllowed(19, 20));
+        CHECK(mechLuxuryUpgradeAllowed(20, 20));
+        CHECK(mechLuxuryUpgradeAllowed(0, 0));
+    }
+
+    void testMoveGuard()
+    {
+        CHECK(autoCommandInterval(3) == 0);
+        CHECK(autoCommandInterval(4) == 0);
+        CHECK(autoCommandInterval(5) == 7);
+        CHECK(autoCommandInterval(6) == 8);
+
+        MoveGuardInput base{true, false, false, true, 4, 24, 1, 7};
+        CHECK(skipRepeatedMove(base));                                  // observer creeping 4px/frame: skipped
+        auto m = base; m.framesSinceLastCommand = 7; CHECK(!skipRepeatedMove(m));   // interval elapsed: resend
+        m = base; m.distToLastTarget = 25; CHECK(!skipRepeatedMove(m)); // new target: send
+        m = base; m.force = true; CHECK(!skipRepeatedMove(m));
+        m = base; m.stuck = true; CHECK(!skipRepeatedMove(m));
+        m = base; m.lastWasMove = false; CHECK(!skipRepeatedMove(m));
+        m = base; m.enabled = false; CHECK(!skipRepeatedMove(m));
+        m = base; m.interval = 0; CHECK(!skipRepeatedMove(m));          // low latency: upstream behavior
+    }
+}
+
 int main()
 {
     testStuck();
@@ -283,6 +331,8 @@ int main()
     testDetection();
     testBioScales();
     testCannons();
+    testMech();
+    testMoveGuard();
 
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

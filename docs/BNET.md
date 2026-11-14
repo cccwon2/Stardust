@@ -24,7 +24,7 @@ The effective values (after clamping and derived defaults) are written to the `[
 | `stacked_mineral_fallback` | `true` | Detects bases with stacked/overlapping mineral patches (same tile or centers < 24px apart) and uses simple gather mode there even when `safe_bnet_mining` is off. Also recovers stuck workers (see "Stuck worker recovery" below). |
 | `stuck_worker_frames` | `48` | Stuck detection threshold (clamped 12-1000). |
 | `max_orders_per_frame` | `0` | Cap on worker resource orders (gather / return cargo / resource right-click) per frame. `0` = unlimited. |
-| `min_command_interval_frames` | `-1` | Minimum frames between identical commands to the same unit. `-1` = auto: `latencyFrames + 2` when `getLatencyFrames() > 4`, otherwise off. Applies only to workers in simple gather mode: same-target gather / return cargo / resource right-click, and same-target mining moves issued directly by `Workers::issueOrders` (`Workers::miningMoveTo`). Combat units, scouting, fleeing no-go areas, building and other worker moves keep upstream behavior. |
+| `min_command_interval_frames` | `-1` | Minimum frames between identical commands to the same unit. `-1` = auto: `maxLatency + 2` when the highest `getLatencyFrames()` seen this game is `> 4`, otherwise off (the maximum is latched because Remastered reported 5 at game start and 3 later, which used to switch the guard off mid-game). Also used as the interval of `combat_move_guard` (see "PvT vs. mech" below). Applies only to workers in simple gather mode: same-target gather / return cargo / resource right-click, and same-target mining moves issued directly by `Workers::issueOrders` (`Workers::miningMoveTo`). Combat units, scouting, fleeing no-go areas, building and other worker moves keep upstream behavior. |
 | `enable_auto_gg` | `false` | Enables the surrender logic (send "gg" and leave). Previously this was always on in `VS_HUMAN` builds. The surrender condition itself is unchanged and strict: no probes, no nexus or < 50 minerals, no mobile combat unit, and an enemy combat unit at one of our bases. |
 
 ### Stuck worker recovery
@@ -146,6 +146,31 @@ Recognizer changes (`PvTEnemyStrategyRecognizer.cpp`, only when `pluto_pvt_snipe
 
 Mid-game vs bio: keep at least `max(4, dragoons)` zealots with leg enhancements started at 2 zealots, and allow arbiters vs `MidGameBio` / `MidGameBioMech` under upstream's conditions (3 nexuses, 20+ army). High templar storm is not added because Stardust has no high templar micro.
 
+## PvT vs. mech and repeated move guard
+
+Added after a Battle.net loss to a 1-rax FE mech Terran (Backrooms 1.1, 17:54): the enemy was recognized as `MidGameMech`
+at 5:36, but the bot took its 5th nexus at 10:08 with roughly 20 zealots/dragoons, built 43 zealots vs. 34 dragoons into
+tanks/vultures/mines, spent gas on observer/shuttle upgrades and a robotics support bay, and lost to a single tank push at
+12:00. The replay also showed about 20,000 APM (167,609 move orders, 42,031 of them to observers), while the log reported
+`bwapi_apm=0` throughout.
+
+All mech keys apply only while `pluto_pvt_snipe` and `pvt_mech_fix` are on and the Terran is recognized as `MidGameMech`.
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `pvt_mech_fix` | `true` | Master switch for the mech changes below. `false` = previous behavior. |
+| `mech_workers_per_army_unit` | `4` | Baseline main-army production (`PvT` mid/late game): one unit per N mineral workers, ahead of other production. Upstream uses 6 (2-12). |
+| `mech_zealot_ratio` | `0.5` | With 3+ enemy tanks, desired zealots = `min(ratio * dragoons, 2 * tanks)` instead of upstream `min(1.5 * dragoons, 3 * tanks)` (0-1.5). Zealots are still used as the gas-shortage filler, as upstream. |
+| `mech_expand_army_per_base` | `6` | From the 4th base on, a new expansion is queued only if completed zealots + dragoons >= N x owned bases (3 bases -> 18, 4 -> 24). Existing expansion plays are not cancelled. Also removes the "enemy contained" expansion boost vs. mech, since a turtling tank line looks contained. `0` = off (0-20). |
+| `mech_luxury_upgrade_min_army` | `20` | Defers Gravitic Boosters, Sensor Array and Gravitic Drive (which pulls in a robotics support bay) until the army reaches N units. `0` = off (0-60). |
+| `mech_attack_start_scale` | `0.7` | AttackBaseSquad aggression multiplier for start (moving -> attacking), same decision points as the bio scales (0.1-2.0). |
+| `mech_attack_continue_scale` | `1.0` | Continue (attacking -> regrouping). `1.0` = upstream. |
+| `mech_attack_resume_scale` | `0.7` | Resume (regrouping -> attacking). |
+| `combat_move_guard` | `true` | For non-worker units (observers, army): a move to within `move_resend_tolerance_px` of the last move target is skipped if the last command was sent less than the command interval ago (auto: latched max latency + 2, i.e. 7 frames at latency 5). Forced moves, stuck units and other command types (attack, stop, ...) are never skipped. Inactive when the interval is 0 (latency <= 4 and `min_command_interval_frames=-1`). |
+| `move_resend_tolerance_px` | `24` | Distance (px) under which a new move target counts as the same target (3-96). Upstream resends above 3px. |
+
+Not changed: the arbiter condition (3 nexuses, 20+ army), carrier switch (disabled upstream), unit micro.
+
 ## Phase 3: Build script and summary log
 
 - `scripts/build-bnet.ps1`: configures with `-G "Visual Studio 17 2022" -A Win32 -DTOURNAMENT_BUILD=ON` (which also skips the `windbg` target), builds only the `Stardust` target in Release, and copies `Stardust.dll` plus `config/stardust_bnet.json` to `dist/bwapi-data/AI/`. An existing `dist/.../stardust_bnet.json` is kept unless `-OverwriteConfig`; the defaults are always written to `stardust_bnet.default.json`. Options: `-Clean`, `-VsHuman`, `-NoBnetLog`, `-BuildDir`, `-DistDir`.
@@ -169,6 +194,10 @@ Mid-game vs bio: keep at least `max(4, dragoons)` zealots with leg enhancements 
 ### Log line meanings
 
 - Lines are written only on state changes (`[START]`, `[OURS]`, `[ENEMY]`, `[EVENT]`, `[END]`) and every 2 game minutes (`[APM]`, every 2880 frames). Nothing is written per frame or per unit; the counters below are plain in-memory integers.
+- `orders_per_min` (`[APM]` line): our own count of orders issued over the last 2 game minutes, converted to per minute. Counted in `MyUnitImpl::update` from the one-order-per-unit-per-frame flag, so selections are not included and orders sent directly through BWAPI outside `MyUnit` are missed. Use this instead of `bwapi_apm`, which was 0 on Remastered.
+- `orders_total` / `orders_worker` / `orders_observer` / `orders_army`: cumulative issued orders by unit category. `moves_skipped`: non-worker moves skipped by `combat_move_guard`.
+- `mech_to_attack` / `mech_to_regroup`: like `bio_*`, while the mech scales are active. `mech_gate_blocks`: times the mech expansion gate switched to blocked; each switch also writes `[EVENT] mech_expand_gate=blocked|open bases=.. army=.. required=..`.
+- `latency_max` / `cmd_interval`: highest latency seen so far and the effective command interval.
 - `bwapi_apm`: `BWAPI::Game::getAPM(false)` (selections excluded), sampled when the `[APM]` line is written. BWAPI computes it with an exponential decay (APMAlert formula, time constant about 0.95 minutes), so it reflects roughly the last minute of play, not a game average and not our own command count. `bwapi_apm_at_end` is the same value at game end; `bwapi_apm_max_sampled` is the maximum over the 2-minute samples (short spikes between samples are not captured). Older logs used `apm`, `avg_apm` and `max_sampled_apm` for these values.
 - `res_*`: cumulative counts (since game start) of resource commands (gather / return cargo / resource right-click) for workers in simple gather mode only, i.e. where the Battle.net guards apply. `res_attempts` = calls reaching the guard; `res_issued` = commands BWAPI accepted; `res_blocked_interval` = same command to the same target within `min_command_interval_frames`; `res_blocked_already` = already moving to / waiting at / mining the target, or already returning cargo; `res_blocked_budget` = `max_orders_per_frame` exhausted. Attempts that BWAPI itself rejects are counted in `res_attempts` only. Optimized-mining workers and recovery commands are not counted here.
 - `stuck_*`: cumulative stuck-worker recovery counts: `stuck_attempts` (recoveries started), `stuck_reassign` (successful reassignment to a different patch), `stuck_cmd_ok` / `stuck_cmd_failed` (recovery gather accepted / rejected by BWAPI), `stuck_budget_deferred` (postponed because the per-frame budget was exhausted).

@@ -1,4 +1,5 @@
 #include "MyUnit.h"
+#include "BnetLog.h"
 
 #include "UnitUtil.h"
 #include "Units.h"
@@ -123,6 +124,15 @@ void MyUnitImpl::update(BWAPI::Unit unit)
     }
 
     UnitImpl::update(unit);
+
+    // Battle.net log: count the order issued to this unit on the previous frame (BWAPI's getAPM is 0 on Remastered)
+    if (issuedOrderThisFrame)
+    {
+        BnetLog::countIssuedOrder(type.isWorker()
+                                  ? BnetLog::OrderCategory::Worker
+                                  : (type == BWAPI::UnitTypes::Protoss_Observer ? BnetLog::OrderCategory::Observer
+                                                                                 : BnetLog::OrderCategory::Army));
+    }
 
     issuedOrderThisFrame = false;
     moveCommand = nullptr;

@@ -1,4 +1,7 @@
 #include "StrategyEngine.h"
+#include "BnetConfig.h"
+#include "BnetPolicy.h"
+#include "BnetLog.h"
 
 #include "Map.h"
 #include "Units.h"
@@ -122,6 +125,16 @@ void StrategyEngine::defaultExpansions(std::vector<std::shared_ptr<Play>> &plays
         }
     }
 
+    // pvt_mech_fix: against a Terran recognized as MidGameMech, gate the 4th+ base on army size (see below)
+    bool mechFix = false;
+    {
+        auto &bnetConfig = BnetConfig::get();
+        auto engine = Strategist::getStrategyEngine();
+        mechFix = bnetConfig.plutoPvtSnipe && bnetConfig.pvtMechFix &&
+                  BWAPI::Broodwar->enemy() && BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Terran &&
+                  engine && engine->getEnemyStrategy() == "MidGameMech";
+    }
+
     // Determine whether we want to expand now
     bool gasStarved = BWAPI::Broodwar->self()->minerals() > 1500 && BWAPI::Broodwar->self()->gas() < 500;
     int excessMineralAssignments = 0;
@@ -133,7 +146,8 @@ void StrategyEngine::defaultExpansions(std::vector<std::shared_ptr<Play>> &plays
 
         // If the enemy is contained, boost the threshold
         // This is for now only applied to terran, since we can lose games against protoss and zerg by overexpanding
-        if (BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Terran && Strategist::isEnemyContained())
+        // pvt_mech_fix: not against mech, where a turtling tank line looks "contained" while it is massing for a push
+        if (BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Terran && Strategist::isEnemyContained() && !mechFix)
         {
             availableMineralAssignmentsThreshold += 3;
         }
@@ -310,6 +324,18 @@ void StrategyEngine::defaultExpansions(std::vector<std::shared_ptr<Play>> &plays
 
     // Break out if we don't want to expand to a normal base
     if (excessMineralAssignments > 0 || (!safeToExpand() && !excessIdleWorkers)) return;
+
+    // pvt_mech_fix: from the 4th base on, require mech_expand_army_per_base completed zealots + dragoons per owned base.
+    // Existing expansion plays are not cancelled; only new ones are held back.
+    if (mechFix)
+    {
+        int bases = (int)Map::getMyBases().size();
+        int army = Units::countCompleted(BWAPI::UnitTypes::Protoss_Zealot) + Units::countCompleted(BWAPI::UnitTypes::Protoss_Dragoon);
+        int perBase = BnetConfig::get().mechExpandArmyPerBase;
+        bool allowed = BnetPolicy::mechExpansionAllowed(bases, army, perBase);
+        BnetLog::mechExpandGate(!allowed, bases, army, perBase * bases);
+        if (!allowed) return;
+    }
 
     // Determine if we want to consider a mineral-only base
     auto shouldTakeMineralOnly = [&gasStarved]()
