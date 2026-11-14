@@ -20,6 +20,40 @@ namespace BnetLog
         ResourceOrderStats resourceOrderStats;
         int bioToAttack = 0;
         int bioToRegroup = 0;
+        int mechToAttack = 0;
+        int mechToRegroup = 0;
+
+        // Issued orders: cumulative and since the last [APM] line
+        int ordersWorker = 0;
+        int ordersObserver = 0;
+        int ordersArmy = 0;
+        int ordersWindow = 0;
+        int movesSkipped = 0;
+        int mechGateState = -1;     // -1 unknown, 0 open, 1 blocked
+        int mechGateBlocks = 0;     // Number of open -> blocked transitions
+    }
+
+    void mechDecision(bool wasAttacking, bool nowAttacking)
+    {
+        if (wasAttacking == nowAttacking) return;
+        if (nowAttacking) mechToAttack++;
+        else mechToRegroup++;
+    }
+
+    void countIssuedOrder(OrderCategory category)
+    {
+        switch (category)
+        {
+            case OrderCategory::Worker: ordersWorker++; break;
+            case OrderCategory::Observer: ordersObserver++; break;
+            case OrderCategory::Army: ordersArmy++; break;
+        }
+        ordersWindow++;
+    }
+
+    void moveSkipped()
+    {
+        movesSkipped++;
     }
 
     ResourceOrderStats &resourceOrders()
@@ -41,6 +75,15 @@ namespace BnetLog
             resourceOrderStats = ResourceOrderStats();
             bioToAttack = 0;
             bioToRegroup = 0;
+            mechToAttack = 0;
+            mechToRegroup = 0;
+            ordersWorker = 0;
+            ordersObserver = 0;
+            ordersArmy = 0;
+            ordersWindow = 0;
+            movesSkipped = 0;
+            mechGateState = -1;
+            mechGateBlocks = 0;
         }
 
         // Cumulative counters, appended to [APM] and [END]
@@ -60,7 +103,17 @@ namespace BnetLog
                << " stuck_cmd_failed=" << rec.commandFailed
                << " stuck_budget_deferred=" << rec.budgetDeferred
                << " bio_to_attack=" << bioToAttack
-               << " bio_to_regroup=" << bioToRegroup;
+               << " bio_to_regroup=" << bioToRegroup
+               << " mech_to_attack=" << mechToAttack
+               << " mech_to_regroup=" << mechToRegroup
+               << " orders_total=" << (ordersWorker + ordersObserver + ordersArmy)
+               << " orders_worker=" << ordersWorker
+               << " orders_observer=" << ordersObserver
+               << " orders_army=" << ordersArmy
+               << " moves_skipped=" << movesSkipped
+               << " mech_gate_blocks=" << mechGateBlocks
+               << " latency_max=" << BnetConfig::maxLatencyFrames()
+               << " cmd_interval=" << BnetConfig::commandIntervalFrames();
             return os.str();
         }
     }
@@ -157,8 +210,13 @@ namespace BnetLog
         int apm = BWAPI::Broodwar->getAPM(false);
         if (apm > maxApm) maxApm = apm;
 
+        // Our own count of issued orders over the window (BWAPI's APM is 0 on Remastered)
+        int ordersPerMin = (ordersWindow * 60 * 24) / apmIntervalFrames;
+        ordersWindow = 0;
+
         std::ostringstream os;
-        os << "bwapi_apm=" << apm
+        os << "orders_per_min=" << ordersPerMin
+           << " bwapi_apm=" << apm
            << " latency_frames=" << BWAPI::Broodwar->getLatencyFrames()
            << " supply=" << (BWAPI::Broodwar->self()->supplyUsed() / 2)
            << " " << counters();
@@ -184,6 +242,21 @@ namespace BnetLog
         writeLine("EVENT", text);
     }
 
+    void mechExpandGate(bool blocked, int bases, int armyUnits, int required)
+    {
+        int state = blocked ? 1 : 0;
+        if (state == mechGateState) return;
+        if (blocked) mechGateBlocks++;
+        bool first = mechGateState == -1;
+        mechGateState = state;
+        if (first && !blocked) return;  // Don't log the initial open state
+
+        std::ostringstream os;
+        os << "mech_expand_gate=" << (blocked ? "blocked" : "open")
+           << " bases=" << bases << " army=" << armyUnits << " required=" << required;
+        writeLine("EVENT", os.str());
+    }
+
     void gameEnd(bool isWinner)
     {
         if (!active) return;
@@ -206,6 +279,12 @@ namespace BnetLog
     void enemyStrategyChanged(const std::string &) {}
     void myStrategyChanged(const std::string &) {}
     void event(const std::string &) {}
+    void mechExpandGate(bool blocked, int, int, int)
+    {
+        int state = blocked ? 1 : 0;
+        if (state != mechGateState && blocked) mechGateBlocks++;
+        mechGateState = state;
+    }
     void gameEnd(bool) {}
 #endif
 }

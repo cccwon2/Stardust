@@ -4,6 +4,7 @@
 #include "DebugFlag_UnitOrders.h"
 #include "BnetConfig.h"
 #include "BnetLog.h"
+#include "BnetPolicy.h"
 
 namespace
 {
@@ -65,6 +66,31 @@ void MyUnitImpl::move(BWAPI::Position position, bool force)
         if (force) return false;
         if (bwapiUnit->isStuck()) return false;
         if (bwapiUnit->getLastCommand().getType() != BWAPI::UnitCommandTypes::Move) return false;
+
+        // Battle.net repeated move guard (non-worker units: observers, army). Upstream resends whenever the target moved
+        // more than 3px, so per-frame target updates produced one move per unit per frame (~20,000 APM on Battle.net).
+        // Within the command interval (latched latency + 2), a move to within move_resend_tolerance_px of the last
+        // target is skipped. Workers keep their own guard (bnetGuardMoves) and upstream behavior.
+        if (!type.isWorker())
+        {
+            auto &bnetConfig = BnetConfig::get();
+            int interval = bnetConfig.combatMoveGuard ? BnetConfig::commandIntervalFrames() : 0;
+            BnetPolicy::MoveGuardInput guard{
+                    bnetConfig.combatMoveGuard && interval > 0,
+                    force,
+                    bwapiUnit->isStuck(),
+                    true,
+                    bwapiUnit->getLastCommand().getTargetPosition().getApproxDistance(position),
+                    bnetConfig.moveResendTolerancePx,
+                    currentFrame - lastCommandFrame,
+                    interval};
+            if (BnetPolicy::skipRepeatedMove(guard))
+            {
+                BnetLog::moveSkipped();
+                return true;
+            }
+        }
+
         if (bwapiUnit->getLastCommand().getTargetPosition().getApproxDistance(position) > 3) return false;
 
         // Battle.net guard (mining moves of simple-gather workers only, see Workers::miningMoveTo): in high-latency

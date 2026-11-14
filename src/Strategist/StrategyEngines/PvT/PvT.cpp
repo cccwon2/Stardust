@@ -33,6 +33,19 @@ namespace
         if (typeid(*current) == typeid(T)) return;
         current->status.transitionTo = std::make_shared<T>(std::forward<Args>(args)...);
     }
+
+    // pvt_mech_fix: active while pluto_pvt_snipe is on and the enemy is recognized as MidGameMech
+    bool bnetMechFixActive(PvT::TerranStrategy enemyStrategy)
+    {
+        auto &bnetConfig = BnetConfig::get();
+        return bnetConfig.plutoPvtSnipe && bnetConfig.pvtMechFix && enemyStrategy == PvT::TerranStrategy::MidGameMech;
+    }
+
+    // Completed main-army combat units (zealots + dragoons), used by the mech army gates
+    int bnetArmyUnitCount()
+    {
+        return Units::countCompleted(BWAPI::UnitTypes::Protoss_Zealot) + Units::countCompleted(BWAPI::UnitTypes::Protoss_Dragoon);
+    }
 }
 
 void PvT::initialize(std::vector<std::shared_ptr<Play>> &plays, bool transitioningFromRandom, const std::string &openingOverride)
@@ -284,7 +297,10 @@ void PvT::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
     auto midAndLateGameMainArmyProduction = [&]()
     {
         // Baseline production is one combat unit for every 6 workers (approximately 3 units per mining base)
-        int higherPriorityCount = (Workers::mineralWorkers() / 6) - inProgressCount;
+        // pvt_mech_fix: against mech use mech_workers_per_army_unit (default 4), since the bot kept out-expanding its army
+        bool mechFix = bnetMechFixActive(enemyStrategy);
+        int workersPerArmyUnit = mechFix ? BnetConfig::get().mechWorkersPerArmyUnit : 6;
+        int higherPriorityCount = BnetPolicy::armyBaselineUnits(Workers::mineralWorkers(), workersPerArmyUnit) - inProgressCount;
 
         // Counter tanks with speedlots once the enemy has at least four
         int enemyTanks = Units::countEnemy(BWAPI::UnitTypes::Terran_Siege_Tank_Siege_Mode) +
@@ -296,6 +312,12 @@ void PvT::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
             if (Units::countEnemy(BWAPI::UnitTypes::Terran_Vulture) > enemyTanks)
             {
                 desiredZealots = std::min(dragoonCount, enemyTanks * 2);
+            }
+
+            // pvt_mech_fix: keep the army dragoon-heavy against tanks, vultures and mines (default 0.5 zealot per dragoon)
+            if (mechFix)
+            {
+                desiredZealots = BnetPolicy::mechZealotTarget(dragoonCount, enemyTanks, BnetConfig::get().mechZealotRatio);
             }
 
             if (desiredZealots > zealotCount)
@@ -687,18 +709,26 @@ void PvT::handleUpgrades(std::map<int, std::vector<ProductionGoal>> &prioritized
     // Basic infantry skill upgrades are queued when we have enough of them and are still building them
     upgradeAtCount(prioritizedProductionGoals, BWAPI::UpgradeTypes::Leg_Enhancements, BWAPI::UnitTypes::Protoss_Zealot, 6);
 
+    // pvt_mech_fix: against mech, defer observer speed / sight and shuttle speed (which also builds a robotics support bay)
+    // until the army reaches mech_luxury_upgrade_min_army, so gas goes into dragoons first
+    bool luxuryUpgrades = !bnetMechFixActive(enemyStrategy) ||
+                          BnetPolicy::mechLuxuryUpgradeAllowed(bnetArmyUnitCount(), BnetConfig::get().mechLuxuryUpgradeMinArmy);
+
     // Cases where we want the upgrade as soon as we start building one of the units
-    upgradeWhenUnitCreated(prioritizedProductionGoals,
-                           BWAPI::UpgradeTypes::Gravitic_Boosters,
-                           BWAPI::UnitTypes::Protoss_Observer,
-                           false,
-                           false,
-                           PRIORITY_HIGHPRIORITYUPGRADES);
-    upgradeWhenUnitCreated(prioritizedProductionGoals,
-                           BWAPI::UpgradeTypes::Gravitic_Drive,
-                           BWAPI::UnitTypes::Protoss_Shuttle,
-                           false,
-                           Units::countCompleted(BWAPI::UnitTypes::Protoss_Assimilator) < 3);
+    if (luxuryUpgrades)
+    {
+        upgradeWhenUnitCreated(prioritizedProductionGoals,
+                               BWAPI::UpgradeTypes::Gravitic_Boosters,
+                               BWAPI::UnitTypes::Protoss_Observer,
+                               false,
+                               false,
+                               PRIORITY_HIGHPRIORITYUPGRADES);
+        upgradeWhenUnitCreated(prioritizedProductionGoals,
+                               BWAPI::UpgradeTypes::Gravitic_Drive,
+                               BWAPI::UnitTypes::Protoss_Shuttle,
+                               false,
+                               Units::countCompleted(BWAPI::UnitTypes::Protoss_Assimilator) < 3);
+    }
     upgradeWhenUnitCreated(prioritizedProductionGoals,
                            BWAPI::UpgradeTypes::Carrier_Capacity,
                            BWAPI::UnitTypes::Protoss_Carrier,
@@ -719,7 +749,7 @@ void PvT::handleUpgrades(std::map<int, std::vector<ProductionGoal>> &prioritized
                            PRIORITY_HIGHPRIORITYUPGRADES);
 
     // Get observer sight range on three gases
-    if (Units::countCompleted(BWAPI::UnitTypes::Protoss_Assimilator) >= 3)
+    if (luxuryUpgrades && Units::countCompleted(BWAPI::UnitTypes::Protoss_Assimilator) >= 3)
     {
         upgradeWhenUnitCreated(prioritizedProductionGoals,
                                BWAPI::UpgradeTypes::Sensor_Array,

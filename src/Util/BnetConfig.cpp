@@ -16,6 +16,7 @@ namespace BnetConfig
         Config config;
         bool fromFile = false;
         bool mainCannonsPresent = false;
+        int maxLatency = 0;
         std::string path;
 
         const char *candidatePaths[] = {
@@ -107,6 +108,7 @@ namespace BnetConfig
     void initialize()
     {
         config = Config();
+        maxLatency = 0;
         fromFile = false;
         mainCannonsPresent = false;
         path.clear();
@@ -151,6 +153,16 @@ namespace BnetConfig
                 config.bioAttackResumeScale = bioScales.resume;
                 config.bioLegacyKeyPresent = bioKeys.hasLegacy;
                 config.bioLegacyScale = bioKeys.legacy;
+                read(json, "pvt_mech_fix", config.pvtMechFix);
+                read(json, "mech_workers_per_army_unit", config.mechWorkersPerArmyUnit);
+                read(json, "mech_zealot_ratio", config.mechZealotRatio);
+                read(json, "mech_expand_army_per_base", config.mechExpandArmyPerBase);
+                read(json, "mech_luxury_upgrade_min_army", config.mechLuxuryUpgradeMinArmy);
+                read(json, "mech_attack_start_scale", config.mechAttackStartScale);
+                read(json, "mech_attack_continue_scale", config.mechAttackContinueScale);
+                read(json, "mech_attack_resume_scale", config.mechAttackResumeScale);
+                read(json, "combat_move_guard", config.combatMoveGuard);
+                read(json, "move_resend_tolerance_px", config.moveResendTolerancePx);
                 read(json, "bnet_log", config.bnetLog);
 
                 fromFile = true;
@@ -177,6 +189,14 @@ namespace BnetConfig
         config.bioAttackStartScale = std::clamp(config.bioAttackStartScale, 0.1, 2.0);
         config.bioAttackContinueScale = std::clamp(config.bioAttackContinueScale, 0.1, 2.0);
         config.bioAttackResumeScale = std::clamp(config.bioAttackResumeScale, 0.1, 2.0);
+        config.mechWorkersPerArmyUnit = std::clamp(config.mechWorkersPerArmyUnit, 2, 12);
+        config.mechZealotRatio = std::clamp(config.mechZealotRatio, 0.0, 1.5);
+        config.mechExpandArmyPerBase = std::clamp(config.mechExpandArmyPerBase, 0, 20);
+        config.mechLuxuryUpgradeMinArmy = std::clamp(config.mechLuxuryUpgradeMinArmy, 0, 60);
+        config.mechAttackStartScale = std::clamp(config.mechAttackStartScale, 0.1, 2.0);
+        config.mechAttackContinueScale = std::clamp(config.mechAttackContinueScale, 0.1, 2.0);
+        config.mechAttackResumeScale = std::clamp(config.mechAttackResumeScale, 0.1, 2.0);
+        config.moveResendTolerancePx = std::clamp(config.moveResendTolerancePx, 3, 96);
     }
 
     const Config &get()
@@ -219,17 +239,39 @@ namespace BnetConfig
         if (config.bioLegacyKeyPresent) os << config.bioLegacyScale << "(start/resume only)";
         else os << "absent";
         os
+           << " pvt_mech_fix=" << config.pvtMechFix
+           << " mech_workers_per_army_unit=" << config.mechWorkersPerArmyUnit
+           << " mech_zealot_ratio=" << config.mechZealotRatio
+           << " mech_expand_army_per_base=" << config.mechExpandArmyPerBase
+           << " mech_luxury_upgrade_min_army=" << config.mechLuxuryUpgradeMinArmy
+           << " mech_attack_start_scale=" << config.mechAttackStartScale
+           << " mech_attack_continue_scale=" << config.mechAttackContinueScale
+           << " mech_attack_resume_scale=" << config.mechAttackResumeScale
+           << " combat_move_guard=" << config.combatMoveGuard
+           << " move_resend_tolerance_px=" << config.moveResendTolerancePx
            << " bnet_log=" << config.bnetLog;
         return os.str();
+    }
+
+    void noteLatency()
+    {
+        int latency = BWAPI::BroodwarPtr ? BWAPI::Broodwar->getLatencyFrames() : 0;
+        if (latency > maxLatency) maxLatency = latency;
+    }
+
+    int maxLatencyFrames()
+    {
+        return maxLatency;
     }
 
     int commandIntervalFrames()
     {
         if (config.minCommandIntervalFrames >= 0) return config.minCommandIntervalFrames;
 
-        // Auto: only active in high-latency environments (Battle.net is typically 5-6 frames)
-        int latency = BWAPI::BroodwarPtr ? BWAPI::Broodwar->getLatencyFrames() : 0;
-        if (latency > 4) return latency + 2;
-        return 0;
+        // Auto: only active in high-latency environments (Battle.net is typically 5-6 frames).
+        // Uses the highest latency seen this game: Remastered reported 5 at start and 3 later, which used to turn the
+        // guard off mid-game.
+        noteLatency();
+        return BnetPolicy::autoCommandInterval(maxLatency);
     }
 }

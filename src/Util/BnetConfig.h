@@ -34,6 +34,20 @@ namespace BnetConfig
         bool bioLegacyKeyPresent = false;       // bio_aggression_scale was present in the file (applies to start / resume only)
         double bioLegacyScale = 0.7;
 
+        // PvT vs. MidGameMech (only with pluto_pvt_snipe on, enemy Terran recognized as MidGameMech)
+        bool pvtMechFix = true;                 // Master switch for the mech changes below
+        int mechWorkersPerArmyUnit = 4;         // Baseline army: one unit per N mineral workers (upstream 6)
+        double mechZealotRatio = 0.5;           // Max zealots per dragoon vs. tanks (upstream 1.5, or 1.0 with many vultures)
+        int mechExpandArmyPerBase = 6;          // 4th+ base needs army >= N * owned bases; also no contained-enemy boost. 0 = off
+        int mechLuxuryUpgradeMinArmy = 20;      // Defer observer speed/sight and shuttle speed until army >= N. 0 = off
+        double mechAttackStartScale = 0.7;      // AttackBaseSquad aggression multipliers vs. MidGameMech
+        double mechAttackContinueScale = 1.0;
+        double mechAttackResumeScale = 0.7;
+
+        // Repeated move guard for non-worker units (observers, army)
+        bool combatMoveGuard = true;            // Skip re-sending a move to (nearly) the same target within the command interval
+        int moveResendTolerancePx = 24;         // Targets within this distance of the last move target count as the same
+
         // Phase 3: Lightweight log
         bool bnetLog = true;                    // Write one-line summaries to bwapi-data/write/stardust_bnet.log
     };
@@ -55,4 +69,8 @@ namespace BnetConfig
     // Effective minimum interval in frames between repeated identical commands to the same unit.
     // Returns 0 when the guard is inactive.
     int commandIntervalFrames();
+
+    // Highest latency observed this game (updated by commandIntervalFrames / noteLatency)
+    int maxLatencyFrames();
+    void noteLatency();
 }

@@ -33,6 +33,17 @@ int main(){
   w("{\"natural_cannons\": 0, \"main_cannons\": 1}");
   BnetConfig::initialize(); c=BnetConfig::get();
   C(c.naturalCannons==0 && c.mainCannons==1);
+  // pvt_mech_fix defaults and clamping
+  std::filesystem::remove_all("bwapi-data");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.pvtMechFix && c.mechWorkersPerArmyUnit==4 && c.mechZealotRatio==0.5 && c.mechExpandArmyPerBase==6);
+  C(c.mechLuxuryUpgradeMinArmy==20 && c.mechAttackStartScale==0.7 && c.mechAttackContinueScale==1.0 && c.mechAttackResumeScale==0.7);
+  C(c.combatMoveGuard && c.moveResendTolerancePx==24);
+  w("{\"pvt_mech_fix\": false, \"mech_workers_per_army_unit\": 1, \"mech_zealot_ratio\": 9, \"mech_expand_army_per_base\": -2, \"move_resend_tolerance_px\": 500, \"combat_move_guard\": false, \"mech_attack_start_scale\": 0.5}");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(!c.pvtMechFix && c.mechWorkersPerArmyUnit==2 && c.mechZealotRatio==1.5 && c.mechExpandArmyPerBase==0);
+  C(c.moveResendTolerancePx==96 && !c.combatMoveGuard && c.mechAttackStartScale==0.5);
+  C(BnetConfig::commandIntervalFrames()==0 && BnetConfig::maxLatencyFrames()==0);   // no game: guard inactive
   printf("%s\n", BnetConfig::summary().c_str());
   printf("fails=%d\n",fails); return fails;
 }

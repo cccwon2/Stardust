@@ -239,4 +239,80 @@ namespace BnetPolicy
         if (mainKeyPresent) return mainCannons;
         return naturalCannons > 0 ? 1 : 0;
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // PvT vs. MidGameMech (pvt_mech_fix)
+    // ---------------------------------------------------------------------------------------------
+
+    // Baseline main-army units requested above other production: one per `workersPerUnit` mineral workers
+    // (upstream uses 6). Non-positive divisor disables the baseline.
+    inline int armyBaselineUnits(int mineralWorkers, int workersPerUnit)
+    {
+        if (workersPerUnit <= 0 || mineralWorkers <= 0) return 0;
+        return mineralWorkers / workersPerUnit;
+    }
+
+    // Desired zealot count against mech: at most `ratio` zealots per dragoon and at most two per enemy tank.
+    // Upstream used min(1.5 * dragoons, 3 * tanks) (min(dragoons, 2 * tanks) with many vultures).
+    inline int mechZealotTarget(int dragoons, int enemyTanks, double ratio)
+    {
+        if (dragoons < 0) dragoons = 0;
+        if (enemyTanks < 0) enemyTanks = 0;
+        if (ratio < 0.0) ratio = 0.0;
+        int byRatio = (int)(dragoons * ratio);
+        int byTanks = enemyTanks * 2;
+        return byRatio < byTanks ? byRatio : byTanks;
+    }
+
+    // Whether a new normal expansion may be queued against mech. The first three bases are never gated; from the
+    // fourth on, the army (completed zealots + dragoons) must be at least `armyPerBase` units per base we own.
+    // armyPerBase <= 0 disables the gate.
+    inline bool mechExpansionAllowed(int ownedBases, int armyUnits, int armyPerBase)
+    {
+        if (armyPerBase <= 0) return true;
+        if (ownedBases < 3) return true;
+        return armyUnits >= armyPerBase * ownedBases;
+    }
+
+    // Luxury upgrades (observer speed / sight, shuttle speed) are deferred against mech until the army reaches
+    // `minArmy` units. minArmy <= 0 disables the deferral.
+    inline bool mechLuxuryUpgradeAllowed(int armyUnits, int minArmy)
+    {
+        if (minArmy <= 0) return true;
+        return armyUnits >= minArmy;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Command interval and repeated move guard
+    // ---------------------------------------------------------------------------------------------
+
+    // Auto min_command_interval_frames from the highest latency observed this game. Remastered can report 5 at game
+    // start and 3 later; latching the maximum keeps the guard from silently turning off mid-game.
+    inline int autoCommandInterval(int maxLatencyFrames)
+    {
+        return maxLatencyFrames > 4 ? maxLatencyFrames + 2 : 0;
+    }
+
+    struct MoveGuardInput
+    {
+        bool enabled;               // combat_move_guard and interval > 0
+        bool force;                 // Caller forced the move
+        bool stuck;                 // BWAPI reports the unit stuck
+        bool lastWasMove;           // The last command was a Move
+        int distToLastTarget;       // Approx distance between the new and the last move target (px)
+        int tolerance;              // move_resend_tolerance_px
+        int framesSinceLastCommand;
+        int interval;               // Effective command interval in frames
+    };
+
+    // Whether a non-worker move to (nearly) the same target as the last move should be skipped because it was sent
+    // less than `interval` frames ago. Upstream resends whenever the target moved more than 3px, which with per-frame
+    // target updates means one move per unit per frame (~20,000 APM observed on Battle.net).
+    inline bool skipRepeatedMove(const MoveGuardInput &in)
+    {
+        if (!in.enabled || in.force || in.stuck || !in.lastWasMove) return false;
+        if (in.interval <= 0) return false;
+        if (in.distToLastTarget > in.tolerance) return false;
+        return in.framesSinceLastCommand < in.interval;
+    }
 }

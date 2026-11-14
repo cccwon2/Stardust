@@ -192,6 +192,7 @@ void StardustAIModule::onFrame()
     }
 #endif
 
+    BnetConfig::noteLatency();
     BnetLog::onFrame();
 
     Timer::start("Frame");
