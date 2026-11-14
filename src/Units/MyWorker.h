@@ -33,6 +33,10 @@ public:
     int8_t verticalSpeed8b;      // 8-bit integer representation of the unit's speed on the Y axis
     uint8_t heading8b;           // 8-bit integer representation of the unit's heading
 
+    // Battle.net: set by Workers::issueOrders each frame when this worker mines in simple gather mode. Enables the
+    // duplicate gather / return cargo / resource right-click guards for this worker only.
+    bool bnetSimpleGather = false;
+
     explicit MyWorkerImpl(BWAPI::Unit unit);
 
     void update(BWAPI::Unit unit) override;

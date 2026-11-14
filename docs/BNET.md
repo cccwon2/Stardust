@@ -17,11 +17,11 @@ Comments (`//`, `/* */`) are allowed. The template is `config/stardust_bnet.json
 
 | Key | Default | Effect |
 | --- | --- | --- |
-| `safe_bnet_mining` | `true` | Bypasses the MiningOptimizationV2 optimized initial split, start-of-mining and return-of-resource path optimizations (all frame-exact resends). Workers use plain `gather()` / `returnCargo()` only, and are never re-ordered while already moving to, waiting at, or mining their patch. Resource command guards (below) are also active only in this mode. |
+| `safe_bnet_mining` | `true` | Bypasses the MiningOptimizationV2 optimized initial split, start-of-mining and return-of-resource path optimizations (all frame-exact resends). Workers use plain `gather()` / `returnCargo()` only, and are never re-ordered while already moving to, waiting at, or mining their patch. All mining workers are in simple gather mode, so the resource command guards (below) apply to all of them. |
 | `stacked_mineral_fallback` | `true` | Detects bases with stacked/overlapping mineral patches (same tile or centers < 24px apart) and uses simple gather mode there even when `safe_bnet_mining` is off. Also recovers stuck workers (see "Stuck worker recovery" below). |
 | `stuck_worker_frames` | `48` | Stuck detection threshold (clamped 12-1000). |
 | `max_orders_per_frame` | `0` | Cap on worker resource orders (gather / return cargo / resource right-click) per frame. `0` = unlimited. |
-| `min_command_interval_frames` | `-1` | Minimum frames between identical commands to the same unit. `-1` = auto: `latencyFrames + 2` when `getLatencyFrames() > 4`, otherwise off. Applies to repeated same-target move orders always, and to same-target gather / return / resource right-click in safe mining mode. |
+| `min_command_interval_frames` | `-1` | Minimum frames between identical commands to the same unit. `-1` = auto: `latencyFrames + 2` when `getLatencyFrames() > 4`, otherwise off. Applies only to workers in simple gather mode: same-target gather / return cargo / resource right-click, and same-target mining moves issued directly by `Workers::issueOrders` (`Workers::miningMoveTo`). Combat units, scouting, fleeing no-go areas, building and other worker moves keep upstream behavior. |
 | `enable_auto_gg` | `false` | Enables the surrender logic (send "gg" and leave). Previously this was always on in `VS_HUMAN` builds. The surrender condition itself is unchanged and strict: no probes, no nexus or < 50 minerals, no mobile combat unit, and an enemy combat unit at one of our bases. |
 
 ### Stuck worker recovery
@@ -47,6 +47,16 @@ After `stuck_worker_frames` without progress, a recovery is attempted:
 Counters (`Workers::bnetRecoveryStats()`): attempts, reassigned (issued and moved to another patch), command ok, command
 failed, budget deferred. `stuck_reassign` in the log now means successful reassignments to a different patch; before this
 change it counted every reassignment attempt.
+
+### Command guard scope
+
+| Setting combination | Guarded workers | Remaining guards |
+| --- | --- | --- |
+| `safe_bnet_mining=true` | All Minerals / Gas job workers (simple gather) | Interval + "already doing it" + budget on their resource commands and direct mining moves |
+| `safe_bnet_mining=false`, `stacked_mineral_fallback=true` | Only workers at stacked-mineral bases and workers that were recovered | Same as above for those workers only; optimized workers are untouched |
+| both `false` | None | None (`max_orders_per_frame` still caps `recoveryGather`, which is unused when the fallback is off) |
+
+Limitation: follow-up waypoint moves issued later by the pathing code (`MyUnitImpl::updateMoveWaypoints`) are not guarded.
 
 ## Code map (actual upstream paths)
 

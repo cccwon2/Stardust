@@ -212,6 +212,16 @@ namespace Workers
             return stacked;
         }
 
+        // Mining-purpose move for a worker in the Minerals / Gas job. For simple-gather workers, enables the Battle.net
+        // same-target move interval guard in MyUnitImpl::move for this call only, so scouting, fleeing (no-go areas),
+        // building and combat moves are never affected.
+        void miningMoveTo(const MyWorker &worker, BWAPI::Position position, bool simpleGather)
+        {
+            worker->bnetGuardMoves = simpleGather;
+            worker->moveTo(position);
+            worker->bnetGuardMoves = false;
+        }
+
         // Whether the given worker should bypass the mining optimizer and use plain gather()
         bool useSimpleGather(const MyWorker &worker, Base *base)
         {
@@ -958,9 +968,12 @@ namespace Workers
         std::map<Base*, std::vector<std::tuple<MyWorker, MyUnit, Resource>>> workersForWhichToOptimizeStartOfMining;
         for (auto &pair : workerJob)
         {
-            if (pair.second == Job::Reserved) continue;
-
             auto &worker = pair.first;
+
+            // Resource command guards apply only to workers in simple gather mode; cleared here and set below for mining jobs
+            worker->bnetSimpleGather = false;
+
+            if (pair.second == Job::Reserved) continue;
 
             // Execute initial split workers until they are finished with the two first rotations
             auto initialSplitIt = initialSplitState.find(worker);
@@ -1001,6 +1014,7 @@ namespace Workers
 
                     // Battle.net: decide whether this worker bypasses the mining optimizer
                     bool simpleGather = useSimpleGather(worker, base);
+                    worker->bnetSimpleGather = simpleGather;
 
                     // Stuck / stacked mineral fallback: recover a cargo-less worker that makes no progress towards its patch.
                     // Workers carrying cargo are never reassigned here (detection resets), so cargo return below is not skipped.
@@ -1064,7 +1078,7 @@ namespace Workers
                                 {
                                     if (worker->getDistance(closestBase->resourceDepot) > 800)
                                     {
-                                        worker->moveTo(closestBase->getPosition());
+                                        miningMoveTo(worker, closestBase->getPosition(), simpleGather);
                                     }
                                     else if (worker->bwapiUnit->getOrder() != BWAPI::Orders::ReturnMinerals &&
                                              worker->bwapiUnit->getOrder() != BWAPI::Orders::ReturnGas &&
@@ -1087,11 +1101,11 @@ namespace Workers
                             // There wasn't another base to return to, or it would take too long, so move towards the preferred base instead
                             if (base->resourceDepot)
                             {
-                                worker->moveTo(base->getPosition());
+                                miningMoveTo(worker, base->getPosition(), simpleGather);
                             }
                             else
                             {
-                                worker->moveTo(base->mineralLineCenter);
+                                miningMoveTo(worker, base->mineralLineCenter, simpleGather);
                             }
                             continue;
                         }
@@ -1137,7 +1151,7 @@ namespace Workers
                         auto bwapiUnit = mineralPatch->getBwapiUnitIfVisible();
                         if (!bwapiUnit)
                         {
-                            worker->moveTo(mineralPatch->center);
+                            miningMoveTo(worker, mineralPatch->center, simpleGather);
                             continue;
                         }
 
@@ -1202,7 +1216,7 @@ namespace Workers
 #if DEBUG_UNIT_ORDERS
                         CherryVis::log(worker->id) << "moveTo: Assigned base (far away)";
 #endif
-                        worker->moveTo(base->getPosition());
+                        miningMoveTo(worker, base->getPosition(), simpleGather);
                         continue;
                     }
 
@@ -1213,7 +1227,7 @@ namespace Workers
 #if DEBUG_UNIT_ORDERS
                     CherryVis::log(worker->id) << "Worker has nothing to do, clearing state";
 #endif
-                    worker->moveTo(base->getPosition());
+                    miningMoveTo(worker, base->getPosition(), simpleGather);
                     break;
                 }
                 case Job::None:
