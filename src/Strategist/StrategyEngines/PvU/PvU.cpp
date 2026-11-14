@@ -5,6 +5,7 @@
 #include "Plays/MainArmy/ForgeFastExpand.h"
 #include "Plays/Scouting/EarlyGameWorkerScout.h"
 #include "Opponent.h"
+#include "BnetConfig.h"
 
 namespace
 {
@@ -25,6 +26,24 @@ void PvU::initialize(std::vector<std::shared_ptr<Play>> &plays, bool transitioni
     plays.emplace_back(std::make_shared<EarlyGameWorkerScout>());
 
     std::string opening = openingOverride;
+
+    // Pluto snipe: a random enemy may turn out to be Pluto Terran, so skip UCB1 and use a fixed opening that transitions
+    // cleanly into the PvT engine (OneGateCore -> PvT EarlyGameDefense)
+    auto &bnetConfig = BnetConfig::get();
+    if (opening.empty() && bnetConfig.plutoPvtSnipe && !bnetConfig.forcedRandomOpening.empty())
+    {
+        for (const auto &[strategy, name] : OurStrategyNames)
+        {
+            if (name == bnetConfig.forcedRandomOpening) opening = name;
+        }
+        if (opening.empty())
+        {
+            Log::Get() << "Unknown forced_random_opening '" << bnetConfig.forcedRandomOpening << "', using OneGateCore";
+            opening = OurStrategyNames[OurStrategy::OneGateCore];
+        }
+        Log::Get() << "Pluto snipe: forced random-race opening " << opening << " (UCB1 skipped)";
+    }
+
     if (opening.empty())
     {
         opening = Opponent::selectOpeningUCB1(

@@ -5,6 +5,7 @@
 #include "Map.h"
 #include "Strategist.h"
 #include "UnitUtil.h"
+#include "BnetConfig.h"
 
 std::map<PvT::TerranStrategy, std::string> PvT::TerranStrategyNames = {
         {TerranStrategy::Unknown,        "Unknown"},
@@ -42,6 +43,56 @@ namespace
         if (timings.size() < count) return false;
 
         return timings[count - 1].first < frame;
+    }
+
+    bool plutoSnipe()
+    {
+        return BnetConfig::get().plutoPvtSnipe;
+    }
+
+    // Pluto snipe: earlier two-factory vulture (2FactVult) detection.
+    // Upstream only checks for two factories, and only while the strategy is still Unknown (usually resolved to Normal by
+    // frame 4000, before the second factory is normally scouted), so two-factory play was rarely recognized.
+    bool isPlutoTwoFactory()
+    {
+        if (currentFrame >= 9000) return false;
+
+        if (countAtLeast(BWAPI::UnitTypes::Terran_Factory, 2)) return true;
+
+        // Early machine shop plus multiple early vultures
+        if (createdBeforeFrame(BWAPI::UnitTypes::Terran_Machine_Shop, 6000) &&
+            createdBeforeFrame(BWAPI::UnitTypes::Terran_Vulture, 6500, 2))
+        {
+            return true;
+        }
+
+        // Several vultures out early, regardless of what was scouted
+        if (createdBeforeFrame(BWAPI::UnitTypes::Terran_Vulture, 7000, 3)) return true;
+
+        // Early spider mines imply vulture-first play
+        return createdBeforeFrame(BWAPI::UnitTypes::Terran_Vulture_Spider_Mine, 7000);
+    }
+
+    // Pluto snipe: early bionic timing (fast second barracks with academy / early medics).
+    // Distinct from MarineRush, which requires no gas and no factory.
+    bool isPlutoEarlyBio()
+    {
+        if (currentFrame >= 7500) return false;
+        if (countAtLeast(BWAPI::UnitTypes::Terran_Factory, 1)) return false;
+
+        if (createdBeforeFrame(BWAPI::UnitTypes::Terran_Barracks, 4500, 2) &&
+            (countAtLeast(BWAPI::UnitTypes::Terran_Academy, 1) || countAtLeast(BWAPI::UnitTypes::Terran_Refinery, 1)))
+        {
+            return true;
+        }
+
+        if (createdBeforeFrame(BWAPI::UnitTypes::Terran_Academy, 5000) &&
+            createdBeforeFrame(BWAPI::UnitTypes::Terran_Marine, 5500, 4))
+        {
+            return true;
+        }
+
+        return createdBeforeFrame(BWAPI::UnitTypes::Terran_Medic, 6500);
     }
 
     bool isFastExpansion()
@@ -283,9 +334,16 @@ PvT::TerranStrategy PvT::recognizeEnemyStrategy()
                 }
 
                 // Two factory
-                if (countAtLeast(BWAPI::UnitTypes::Terran_Factory, 2))
+                if (countAtLeast(BWAPI::UnitTypes::Terran_Factory, 2) || (plutoSnipe() && isPlutoTwoFactory()))
                 {
                     strategy = TerranStrategy::TwoFactory;
+                    continue;
+                }
+
+                // Pluto snipe: early bio timing
+                if (plutoSnipe() && isPlutoEarlyBio())
+                {
+                    strategy = TerranStrategy::MarinePressure;
                     continue;
                 }
 
@@ -377,6 +435,8 @@ PvT::TerranStrategy PvT::recognizeEnemyStrategy()
                 if (isBunkerContain()) return TerranStrategy::BunkerContain;
                 if (isMarineRush()) return TerranStrategy::MarineRush;
                 if (isFastExpansion()) return TerranStrategy::FastExpansion;
+                if (plutoSnipe() && isPlutoTwoFactory()) return TerranStrategy::TwoFactory;
+                if (plutoSnipe() && isPlutoEarlyBio()) return TerranStrategy::MarinePressure;
 
                 if (isMidGame())
                 {
@@ -413,6 +473,14 @@ PvT::TerranStrategy PvT::recognizeEnemyStrategy()
                 if (isBunkerContain()) return TerranStrategy::BunkerContain;
                 if (isProxy()) return TerranStrategy::ProxyRush;
                 if (isMarineRush()) return TerranStrategy::MarineRush;
+
+                // Pluto snipe: a "Normal" opening can still turn into two-factory vultures or an early bio timing after the
+                // initial scout, so keep checking (one-way transitions, no loop back to Normal)
+                if (plutoSnipe() && strategy == TerranStrategy::NormalOpening)
+                {
+                    if (isPlutoTwoFactory()) return TerranStrategy::TwoFactory;
+                    if (isPlutoEarlyBio()) return TerranStrategy::MarinePressure;
+                }
 
                 if (isMidGame())
                 {

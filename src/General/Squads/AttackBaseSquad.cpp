@@ -3,6 +3,9 @@
 #include "Units.h"
 #include "UnitUtil.h"
 #include "Map.h"
+#include "Strategist.h"
+#include "StrategyEngine.h"
+#include "BnetConfig.h"
 
 #include "DebugFlag_CombatSim.h"
 
@@ -12,6 +15,22 @@
 
 namespace
 {
+    // Pluto snipe: scale attack aggression down against a recognized MidGameBio Terran, so small groups regroup and wait for
+    // reinforcements instead of trickling into marine/medic. Tunable via bio_aggression_scale in stardust_bnet.json.
+    double bnetAggressionScale()
+    {
+        auto &bnetConfig = BnetConfig::get();
+        if (!bnetConfig.plutoPvtSnipe) return 1.0;
+
+        auto enemy = BWAPI::Broodwar->enemy();
+        if (!enemy || enemy->getRace() != BWAPI::Races::Terran) return 1.0;
+
+        auto engine = Strategist::getStrategyEngine();
+        if (!engine) return 1.0;
+
+        return engine->getEnemyStrategy() == "MidGameBio" ? bnetConfig.bioAggressionScale : 1.0;
+    }
+
     bool pushedBackToNatural(UnitCluster &cluster, int threshold, int *pDist = nullptr)
     {
         if (!cluster.isVanguardCluster) return false;
@@ -144,6 +163,7 @@ namespace
 #endif
 
         double aggression = reinforcementFactor(cluster, closestReinforcements, reinforcementPercentage);
+        aggression *= bnetAggressionScale();
 
         // Increase aggression if we are trying to fight our way out of our natural
         int naturalDist;
@@ -173,6 +193,7 @@ namespace
         {
             aggression += 0.005 * (double)(BWAPI::Broodwar->self()->supplyUsed() - 300);
         }
+        aggression *= bnetAggressionScale();
 
         // Increase aggression if we are trying to fight our way out of our natural
         int naturalDist;

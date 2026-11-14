@@ -4,6 +4,7 @@
 #include "Units.h"
 #include "Plays/MainArmy/DefendMyMain.h"
 #include "Plays/MainArmy/AttackEnemyBase.h"
+#include "BnetConfig.h"
 
 std::map<PvT::OurStrategy, std::string> PvT::OurStrategyNames = {
         {OurStrategy::ForgeExpandGoons,  "ForgeExpandGoons"},
@@ -228,6 +229,16 @@ PvT::OurStrategy PvT::chooseOurStrategy(PvT::TerranStrategy newEnemyStrategy, st
                 if (newEnemyStrategy == TerranStrategy::BunkerContain)
                 {
                     strategy = OurStrategy::AntiBunkerContain;
+                    continue;
+                }
+
+                // Pluto snipe: if two-factory vultures or an early bio timing is recognized after we already went Normal,
+                // fall back to Defensive once (before we are on two bases) so we hold with goons instead of moving out
+                if (BnetConfig::get().plutoPvtSnipe && !plutoDefensiveUsed && currentFrame < 10000 &&
+                    (newEnemyStrategy == TerranStrategy::TwoFactory || newEnemyStrategy == TerranStrategy::MarinePressure) &&
+                    Units::countCompleted(BWAPI::UnitTypes::Protoss_Nexus) < 2)
+                {
+                    strategy = OurStrategy::Defensive;
                     continue;
                 }
 

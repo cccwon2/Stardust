@@ -4,5 +4,12 @@
   "stuck_worker_frames": 48,
   "max_orders_per_frame": 0,
   "min_command_interval_frames": -1,
-  "enable_auto_gg": false
+  "enable_auto_gg": false,
+
+  "pluto_pvt_snipe": true,
+  "forced_pvt_opening": "EarlyGameDefense",
+  "forced_random_opening": "OneGateCore",
+  "early_observer_priority": true,
+  "natural_cannons": 1,
+  "bio_aggression_scale": 0.7
 }
