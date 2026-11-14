@@ -21,9 +21,18 @@ namespace BnetConfig
         bool plutoPvtSnipe = true;              // Master switch for the PvT changes below
         std::string forcedPvtOpening = "EarlyGameDefense";  // PvT opening name used instead of UCB1 (empty = use UCB1)
         std::string forcedRandomOpening = "OneGateCore";    // PvU (random enemy) opening used instead of UCB1 (empty = use UCB1)
-        bool earlyObserverPriority = true;      // Robo -> observatory -> observer early, without waiting for two bases
-        int naturalCannons = 1;                 // Cannons to guarantee at the natural once it is taken (0-2)
-        double bioAggressionScale = 0.7;        // Multiplier applied to attack aggression vs. MidGameBio (lower = more conservative)
+        bool earlyObserverPriority = true;      // Staged first-observer requests (urgent / elevated / preventive), see BnetPolicy
+        int observerMinDragoons = 2;            // Completed dragoons before a two-factory / many-vulture observer gets high priority
+        int naturalCannons = 1;                 // Conditional cannon requests in the natural mineral line once it is taken (0-2)
+        int mainCannons = 1;                    // Conditional cannon requests in the main mineral line vs. vultures / mech (0-1);
+                                                // absent key -> 1 if natural_cannons > 0 else 0
+        // Aggression multipliers vs. a recognized MidGameBio Terran (AttackBaseSquad), per decision state.
+        // Effective values after the compatibility policy in BnetPolicy::resolveBioScales.
+        double bioAttackStartScale = 0.7;       // shouldStartAttack (moving -> attacking)
+        double bioAttackContinueScale = 1.0;    // shouldContinueAttack (attacking -> regrouping); 1.0 = upstream
+        double bioAttackResumeScale = 0.7;      // shouldStopRegrouping (regrouping -> attacking)
+        bool bioLegacyKeyPresent = false;       // bio_aggression_scale was present in the file (applies to start / resume only)
+        double bioLegacyScale = 0.7;
 
         // Phase 3: Lightweight log
         bool bnetLog = true;                    // Write one-line summaries to bwapi-data/write/stardust_bnet.log

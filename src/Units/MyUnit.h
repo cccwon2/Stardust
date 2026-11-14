@@ -98,6 +98,10 @@ public:
 
     void setProducerRallyPosition(BWAPI::Position pos) const;
 
+    // Battle.net: when true, MyUnitImpl::move skips re-sending the same move within min_command_interval_frames.
+    // Only set by Workers for the duration of a mining-purpose moveTo of a simple-gather worker; false for all other units.
+    bool bnetGuardMoves = false;
+
 protected:
     bool issuedOrderThisFrame;
     std::deque<BWAPI::UnitCommand> recentCommands;           // Commands issued in last LF

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MyUnit.h"
+#include "BnetPolicy.h"
 
 class MyWorkerImpl;
 
@@ -32,6 +33,10 @@ public:
     int8_t verticalSpeed8b;      // 8-bit integer representation of the unit's speed on the Y axis
     uint8_t heading8b;           // 8-bit integer representation of the unit's heading
 
+    // Battle.net: set by Workers::issueOrders each frame when this worker mines in simple gather mode. Enables the
+    // duplicate gather / return cargo / resource right-click guards for this worker only.
+    bool bnetSimpleGather = false;
+
     explicit MyWorkerImpl(BWAPI::Unit unit);
 
     void update(BWAPI::Unit unit) override;
@@ -39,6 +44,11 @@ public:
     bool gather(BWAPI::Unit target);
 
     bool returnCargo();
+
+    // Battle.net stuck-worker recovery: issues a plain gather that bypasses the duplicate-command guards
+    // (same-command interval / already doing it) but still respects max_orders_per_frame and the one-order-per-frame rule.
+    // Rate limiting is the caller's responsibility (Workers applies a per-worker cooldown).
+    BnetPolicy::RecoveryCommandResult recoveryGather(BWAPI::Unit target);
 
     static int8_t to8bSpeed(double value);
     static uint8_t to8bHeading(double value);

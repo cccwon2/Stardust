@@ -3,6 +3,7 @@
 
 #include "DebugFlag_UnitOrders.h"
 #include "BnetConfig.h"
+#include "BnetLog.h"
 
 namespace
 {
@@ -42,10 +43,12 @@ namespace
         return (currentFrame - lastCommandFrame) < interval;
     }
 
-    // Resource command guards only apply in safe mining mode, since the mining optimizer depends on frame-exact resends
-    bool resourceGuardsActive()
+    // Resource command guards only apply to workers in simple gather mode (all mining workers when safe_bnet_mining is on,
+    // only stacked-mineral / recovered workers when it is off), since the mining optimizer depends on frame-exact resends
+    bool resourceGuardsActive(const MyUnitImpl *unit)
     {
-        return BnetConfig::get().safeBnetMining;
+        auto worker = dynamic_cast<const MyWorkerImpl *>(unit);
+        return worker && worker->bnetSimpleGather;
     }
 }
 
@@ -64,8 +67,9 @@ void MyUnitImpl::move(BWAPI::Position position, bool force)
         if (bwapiUnit->getLastCommand().getType() != BWAPI::UnitCommandTypes::Move) return false;
         if (bwapiUnit->getLastCommand().getTargetPosition().getApproxDistance(position) > 3) return false;
 
-        // Battle.net guard: in high-latency environments, never resend the same move within the minimum command interval
-        if (withinCommandInterval(lastCommandFrame)) return true;
+        // Battle.net guard (mining moves of simple-gather workers only, see Workers::miningMoveTo): in high-latency
+        // environments, don't resend the same move within the minimum command interval. All other units keep upstream behavior.
+        if (bnetGuardMoves && withinCommandInterval(lastCommandFrame)) return true;
 
         // Don't resend orders to similar positions too quickly
         if (lastCommandFrame > (currentFrame - BWAPI::Broodwar->getLatencyFrames() - 3)) return false;
@@ -164,20 +168,29 @@ void MyUnitImpl::rightClick(BWAPI::Unit target)
     }
 
     bool isResourceClick = target->getType().isMineralField() || target->getType().isResourceDepot();
-    if (isResourceClick && resourceGuardsActive())
+    bool guarded = isResourceClick && resourceGuardsActive(this);
+    if (guarded)
     {
+        auto &stats = BnetLog::resourceOrders();
+        stats.attempts++;
         BWAPI::UnitCommand currentCommand(bwapiUnit->getLastCommand());
         if (currentCommand.getType() == BWAPI::UnitCommandTypes::Right_Click_Unit &&
             currentCommand.getTarget() == target &&
             withinCommandInterval(lastCommandFrame))
         {
+            stats.blockedInterval++;
             return;
         }
-        if (!resourceOrderBudgetAvailable()) return;
+        if (!resourceOrderBudgetAvailable())
+        {
+            stats.blockedBudget++;
+            return;
+        }
     }
 
     auto result = bwapiUnit->rightClick(target);
     if (result && isResourceClick) countResourceOrder();
+    if (result && guarded) BnetLog::resourceOrders().issued++;
 
     if (result)
     {
@@ -222,14 +235,21 @@ bool MyWorkerImpl::gather(BWAPI::Unit target)
         }
     }
 
-    if (resourceGuardsActive())
+    bool guarded = resourceGuardsActive(this);
+    if (guarded)
     {
         // Battle.net guard: don't resend a gather to the same target within the minimum command interval,
         // and never re-gather a target the worker is already moving to / waiting at / mining
+        auto &stats = BnetLog::resourceOrders();
+        stats.attempts++;
         BWAPI::UnitCommand currentCommand(bwapiUnit->getLastCommand());
         if (currentCommand.getType() == BWAPI::UnitCommandTypes::Gather && currentCommand.getTarget() == target)
         {
-            if (withinCommandInterval(lastCommandFrame)) return false;
+            if (withinCommandInterval(lastCommandFrame))
+            {
+                stats.blockedInterval++;
+                return false;
+            }
 
             auto order = bwapiUnit->getOrder();
             if (bwapiUnit->getOrderTarget() == target &&
@@ -237,10 +257,15 @@ bool MyWorkerImpl::gather(BWAPI::Unit target)
                  order == BWAPI::Orders::MiningMinerals || order == BWAPI::Orders::MoveToGas ||
                  order == BWAPI::Orders::WaitForGas || order == BWAPI::Orders::HarvestGas))
             {
+                stats.blockedAlready++;
                 return false;
             }
         }
-        if (!resourceOrderBudgetAvailable()) return false;
+        if (!resourceOrderBudgetAvailable())
+        {
+            stats.blockedBudget++;
+            return false;
+        }
     }
 
     auto result = bwapiUnit->gather(target);
@@ -249,6 +274,7 @@ bool MyWorkerImpl::gather(BWAPI::Unit target)
         issuedOrderThisFrame = true;
         gatherCommandFrames.insert(currentFrame);
         countResourceOrder();
+        if (guarded) BnetLog::resourceOrders().issued++;
     }
 
 #if DEBUG_UNIT_ORDERS
@@ -256,6 +282,31 @@ bool MyWorkerImpl::gather(BWAPI::Unit target)
 #endif
 
     return result;
+}
+
+BnetPolicy::RecoveryCommandResult MyWorkerImpl::recoveryGather(BWAPI::Unit target)
+{
+    if (!target || !target->exists()) return BnetPolicy::RecoveryCommandResult::Rejected;
+    if (issuedOrderThisFrame)
+    {
+        Log::Get() << "DUPLICATE ORDER: " << *this << ": Recovery gather " << target->getType();
+        return BnetPolicy::RecoveryCommandResult::Rejected;
+    }
+
+    if (!resourceOrderBudgetAvailable()) return BnetPolicy::RecoveryCommandResult::BudgetExhausted;
+
+    auto result = bwapiUnit->gather(target);
+    if (!result) return BnetPolicy::RecoveryCommandResult::Rejected;
+
+    issuedOrderThisFrame = true;
+    gatherCommandFrames.insert(currentFrame);
+    countResourceOrder();
+
+#if DEBUG_UNIT_ORDERS
+    CherryVis::log(id) << "Order: Recovery gather " << BWAPI::WalkPosition(target->getPosition());
+#endif
+
+    return BnetPolicy::RecoveryCommandResult::Issued;
 }
 
 bool MyWorkerImpl::returnCargo()
@@ -266,17 +317,29 @@ bool MyWorkerImpl::returnCargo()
         return false;
     }
 
-    if (resourceGuardsActive())
+    bool guarded = resourceGuardsActive(this);
+    if (guarded)
     {
         // Battle.net guard: don't spam return cargo while the worker is already returning or the last return is still in flight
+        auto &stats = BnetLog::resourceOrders();
+        stats.attempts++;
         auto order = bwapiUnit->getOrder();
-        if (order == BWAPI::Orders::ReturnMinerals || order == BWAPI::Orders::ReturnGas) return false;
+        if (order == BWAPI::Orders::ReturnMinerals || order == BWAPI::Orders::ReturnGas)
+        {
+            stats.blockedAlready++;
+            return false;
+        }
         if (bwapiUnit->getLastCommand().getType() == BWAPI::UnitCommandTypes::Return_Cargo &&
             withinCommandInterval(lastCommandFrame))
         {
+            stats.blockedInterval++;
             return false;
         }
-        if (!resourceOrderBudgetAvailable()) return false;
+        if (!resourceOrderBudgetAvailable())
+        {
+            stats.blockedBudget++;
+            return false;
+        }
     }
 
     auto result = bwapiUnit->returnCargo();
@@ -285,6 +348,7 @@ bool MyWorkerImpl::returnCargo()
         issuedOrderThisFrame = true;
         returnCommandFrames.insert(currentFrame);
         countResourceOrder();
+        if (guarded) BnetLog::resourceOrders().issued++;
     }
 
 #if DEBUG_UNIT_ORDERS

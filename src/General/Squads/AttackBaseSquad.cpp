@@ -6,6 +6,7 @@
 #include "Strategist.h"
 #include "StrategyEngine.h"
 #include "BnetConfig.h"
+#include "BnetLog.h"
 
 #include "DebugFlag_CombatSim.h"
 
@@ -15,20 +16,35 @@
 
 namespace
 {
-    // Pluto snipe: scale attack aggression down against a recognized MidGameBio Terran, so small groups regroup and wait for
-    // reinforcements instead of trickling into marine/medic. Tunable via bio_aggression_scale in stardust_bnet.json.
-    double bnetAggressionScale()
+    // Pluto snipe: per-state aggression multipliers against a recognized MidGameBio Terran, so small groups wait for
+    // reinforcements instead of trickling into marine/medic. Tunable via bio_attack_{start,continue,resume}_scale.
+    // Applied after the reinforcement factor and before the natural-defense bonus in each decision function.
+    enum class BioDecision { Start, Continue, Resume };
+
+    // Whether the MidGameBio per-state scales apply right now
+    bool bnetBioScalesActive()
     {
-        auto &bnetConfig = BnetConfig::get();
-        if (!bnetConfig.plutoPvtSnipe) return 1.0;
+        if (!BnetConfig::get().plutoPvtSnipe) return false;
 
         auto enemy = BWAPI::Broodwar->enemy();
-        if (!enemy || enemy->getRace() != BWAPI::Races::Terran) return 1.0;
+        if (!enemy || enemy->getRace() != BWAPI::Races::Terran) return false;
 
         auto engine = Strategist::getStrategyEngine();
-        if (!engine) return 1.0;
+        return engine && engine->getEnemyStrategy() == "MidGameBio";
+    }
 
-        return engine->getEnemyStrategy() == "MidGameBio" ? bnetConfig.bioAggressionScale : 1.0;
+    double bnetAggressionScale(BioDecision decision)
+    {
+        if (!bnetBioScalesActive()) return 1.0;
+
+        auto &bnetConfig = BnetConfig::get();
+        switch (decision)
+        {
+            case BioDecision::Start: return bnetConfig.bioAttackStartScale;
+            case BioDecision::Continue: return bnetConfig.bioAttackContinueScale;
+            case BioDecision::Resume: return bnetConfig.bioAttackResumeScale;
+        }
+        return 1.0;
     }
 
     bool pushedBackToNatural(UnitCluster &cluster, int threshold, int *pDist = nullptr)
@@ -163,7 +179,7 @@ namespace
 #endif
 
         double aggression = reinforcementFactor(cluster, closestReinforcements, reinforcementPercentage);
-        aggression *= bnetAggressionScale();
+        aggression *= bnetAggressionScale(BioDecision::Start);
 
         // Increase aggression if we are trying to fight our way out of our natural
         int naturalDist;
@@ -193,7 +209,7 @@ namespace
         {
             aggression += 0.005 * (double)(BWAPI::Broodwar->self()->supplyUsed() - 300);
         }
-        aggression *= bnetAggressionScale();
+        aggression *= bnetAggressionScale(BioDecision::Continue);
 
         // Increase aggression if we are trying to fight our way out of our natural
         int naturalDist;
@@ -309,6 +325,7 @@ namespace
 
         // Adjust the aggression for reinforcements
         aggression *= reinforcementFactor(cluster, closestReinforcements, reinforcementPercentage);
+        aggression *= bnetAggressionScale(BioDecision::Resume);
 
         // Adjust the aggression if we have been pushed back into our natural
         if (pushedBackToNatural(cluster, 500))
@@ -442,6 +459,7 @@ void AttackBaseSquad::execute(UnitCluster &cluster)
     // Make the final decision based on what state we are currently in
 
     bool attack;
+    bool wasAttacking = cluster.currentActivity == UnitCluster::Activity::Attacking;
     switch (cluster.currentActivity)
     {
         case UnitCluster::Activity::Moving:
@@ -458,6 +476,9 @@ void AttackBaseSquad::execute(UnitCluster &cluster)
             attack = false;
             break;
     }
+
+    // Battle.net summary counters: attack <-> regroup transitions while the MidGameBio scales are active
+    if (bnetBioScalesActive()) BnetLog::bioDecision(wasAttacking, attack || ignoreCombatSim);
 
     if (attack || ignoreCombatSim)
     {

@@ -1,4 +1,5 @@
 #include "BnetConfig.h"
+#include "BnetPolicy.h"
 
 #include <BWAPI.h>
 #include <nlohmann/json.hpp>
@@ -14,6 +15,7 @@ namespace BnetConfig
     {
         Config config;
         bool fromFile = false;
+        bool mainCannonsPresent = false;
         std::string path;
 
         const char *candidatePaths[] = {
@@ -34,6 +36,23 @@ namespace BnetConfig
             catch (...)
             {
                 // Wrong type: keep the default
+            }
+        }
+
+        // Like read, but reports whether a valid value was present
+        template<typename T>
+        bool readPresent(const nlohmann::json &json, const char *key, T &target)
+        {
+            auto it = json.find(key);
+            if (it == json.end() || it->is_null()) return false;
+            try
+            {
+                target = it->get<T>();
+                return true;
+            }
+            catch (...)
+            {
+                return false;
             }
         }
     }
@@ -89,6 +108,7 @@ namespace BnetConfig
     {
         config = Config();
         fromFile = false;
+        mainCannonsPresent = false;
         path.clear();
 
         for (auto candidate : candidatePaths)
@@ -117,8 +137,20 @@ namespace BnetConfig
                 read(json, "forced_pvt_opening", config.forcedPvtOpening);
                 read(json, "forced_random_opening", config.forcedRandomOpening);
                 read(json, "early_observer_priority", config.earlyObserverPriority);
+                read(json, "observer_min_dragoons", config.observerMinDragoons);
                 read(json, "natural_cannons", config.naturalCannons);
-                read(json, "bio_aggression_scale", config.bioAggressionScale);
+                mainCannonsPresent = readPresent(json, "main_cannons", config.mainCannons);
+                BnetPolicy::BioScaleKeys bioKeys;
+                bioKeys.hasLegacy = readPresent(json, "bio_aggression_scale", bioKeys.legacy);
+                bioKeys.hasStart = readPresent(json, "bio_attack_start_scale", bioKeys.start);
+                bioKeys.hasContinue = readPresent(json, "bio_attack_continue_scale", bioKeys.cont);
+                bioKeys.hasResume = readPresent(json, "bio_attack_resume_scale", bioKeys.resume);
+                auto bioScales = BnetPolicy::resolveBioScales(bioKeys);
+                config.bioAttackStartScale = bioScales.start;
+                config.bioAttackContinueScale = bioScales.cont;
+                config.bioAttackResumeScale = bioScales.resume;
+                config.bioLegacyKeyPresent = bioKeys.hasLegacy;
+                config.bioLegacyScale = bioKeys.legacy;
                 read(json, "bnet_log", config.bnetLog);
 
                 fromFile = true;
@@ -129,15 +161,22 @@ namespace BnetConfig
             {
                 // Parse error: fall back to defaults and keep looking
                 config = Config();
+                mainCannonsPresent = false;
             }
         }
+
+        config.mainCannons = BnetPolicy::resolveMainCannons(mainCannonsPresent, config.mainCannons, config.naturalCannons);
 
         // Clamp values to sane ranges
         config.stuckWorkerFrames = std::clamp(config.stuckWorkerFrames, 12, 1000);
         config.maxOrdersPerFrame = std::max(0, config.maxOrdersPerFrame);
         config.minCommandIntervalFrames = std::clamp(config.minCommandIntervalFrames, -1, 48);
         config.naturalCannons = std::clamp(config.naturalCannons, 0, 2);
-        config.bioAggressionScale = std::clamp(config.bioAggressionScale, 0.1, 2.0);
+        config.mainCannons = std::clamp(config.mainCannons, 0, 1);
+        config.observerMinDragoons = std::clamp(config.observerMinDragoons, 0, 12);
+        config.bioAttackStartScale = std::clamp(config.bioAttackStartScale, 0.1, 2.0);
+        config.bioAttackContinueScale = std::clamp(config.bioAttackContinueScale, 0.1, 2.0);
+        config.bioAttackResumeScale = std::clamp(config.bioAttackResumeScale, 0.1, 2.0);
     }
 
     const Config &get()
@@ -170,8 +209,16 @@ namespace BnetConfig
            << " forced_pvt_opening=" << (config.forcedPvtOpening.empty() ? "UCB1" : config.forcedPvtOpening)
            << " forced_random_opening=" << (config.forcedRandomOpening.empty() ? "UCB1" : config.forcedRandomOpening)
            << " early_observer_priority=" << config.earlyObserverPriority
+           << " observer_min_dragoons=" << config.observerMinDragoons
            << " natural_cannons=" << config.naturalCannons
-           << " bio_aggression_scale=" << config.bioAggressionScale
+           << " main_cannons=" << config.mainCannons << (mainCannonsPresent ? "" : "(derived)")
+           << " bio_attack_start_scale=" << config.bioAttackStartScale
+           << " bio_attack_continue_scale=" << config.bioAttackContinueScale
+           << " bio_attack_resume_scale=" << config.bioAttackResumeScale
+           << " bio_aggression_scale(legacy)=";
+        if (config.bioLegacyKeyPresent) os << config.bioLegacyScale << "(start/resume only)";
+        else os << "absent";
+        os
            << " bnet_log=" << config.bnetLog;
         return os.str();
     }

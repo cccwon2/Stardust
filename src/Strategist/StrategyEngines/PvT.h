@@ -1,5 +1,7 @@
 #pragma once
 
+#include "BnetPolicy.h"
+
 #include "StrategyEngine.h"
 
 class PvT : public StrategyEngine
@@ -75,6 +77,15 @@ private:
 
     // Pluto snipe: whether we have already used the Defensive strategy this game (prevents Normal <-> Defensive oscillation)
     bool plutoDefensiveUsed = false;
+
+    // Pluto snipe: current first-observer request stage (for logging stage changes)
+    BnetPolicy::DetectionStage plutoDetectionStage = BnetPolicy::DetectionStage::Upstream;
+
+    // Pluto snipe: cannon placement issues already logged (base tile + reason), to avoid repeating them every frame
+    std::set<std::string> plutoCannonIssuesLogged;
+
+    // Battle.net summary log: whether first_observer_complete was written
+    bool plutoFirstObserverLogged = false;
 
     TerranStrategy recognizeEnemyStrategy();
 
