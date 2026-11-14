@@ -6,6 +6,9 @@
 #include "Map.h"
 
 #include "DebugFlag_UnitOrders.h"
+#include "BnetConfig.h"
+#include "BnetLog.h"
+#include "BnetPolicy.h"
 
 /*
  * In order to support multiple different triggers and forms of movement, it is done in two phases. First the move command is queued, then
@@ -310,8 +313,19 @@ void MyUnitImpl::updateMoveWaypoints()
     }
 
     // Check if the unit has been ordered to do something else and clear our move data
+    // Battle.net: when the repeated move guard skipped a move to a nearby waypoint, the last command target differs from
+    // currentlyMovingTowards by up to move_resend_tolerance_px; don't treat that as a new order (it would reset and
+    // re-plan the path every frame).
+    int abortTolerance = 3;
+    {
+        auto &bnetConfig = BnetConfig::get();
+        if (!type.isWorker() && bnetConfig.combatMoveGuard && BnetConfig::commandIntervalFrames() > 0)
+        {
+            abortTolerance = std::max(3, bnetConfig.moveResendTolerancePx);
+        }
+    }
     if (currentCommand.getType() != BWAPI::UnitCommandTypes::Move ||
-        currentCommand.getTargetPosition().getApproxDistance(currentlyMovingTowards) > 3)
+        currentCommand.getTargetPosition().getApproxDistance(currentlyMovingTowards) > abortTolerance)
     {
 #if DEBUG_UNIT_ORDERS
         CherryVis::log(id) << "Order: Aborting move as command has changed";
@@ -333,6 +347,11 @@ void MyUnitImpl::updateMoveWaypoints()
 #if DEBUG_UNIT_ORDERS
             CherryVis::log(id) << "Order: Path node set to " << *gridNode << " towards " << BWAPI::WalkPosition(grid->goal);
 #endif
+            if (holdGridWaypoint())
+            {
+                BnetLog::gridHold();
+                return;
+            }
             moveToNextWaypoint();
             return;
         }
@@ -344,6 +363,11 @@ void MyUnitImpl::updateMoveWaypoints()
             // React if a grid update has changed the desired waypoint
             if (currentlyMovingTowards != next->center())
             {
+                if (holdGridWaypoint())
+                {
+                    BnetLog::gridHold();
+                    return;
+                }
                 moveToNextWaypoint();
             }
             return;
@@ -364,6 +388,35 @@ void MyUnitImpl::updateMoveWaypoints()
     {
         move(currentlyMovingTowards, true);
     }
+}
+
+bool MyUnitImpl::holdGridWaypoint() const
+{
+    auto &bnetConfig = BnetConfig::get();
+    if (!bnetConfig.gridWaypointHold || BnetConfig::commandIntervalFrames() <= 0) return false;
+    if (!grid || !gridNode || !currentlyMovingTowards.isValid()) return false;
+
+    // Is the current waypoint still one of the next nodes on the path from where we are now?
+    // nextNode() looks up to 5 nodes ahead; check one more to tolerate the unit skipping a node.
+    bool onPath = false;
+    auto node = gridNode;
+    for (int i = 0; i < 7 && node; i++)
+    {
+        if (node->center() == currentlyMovingTowards)
+        {
+            onPath = true;
+            break;
+        }
+        node = node->nextNode;
+    }
+
+    BnetPolicy::GridHoldInput in{
+            true,
+            onPath,
+            gridNode->cost <= 90,   // moveToNextWaypoint switches to the final target from here
+            lastPosition.getApproxDistance(currentlyMovingTowards),
+            bnetConfig.gridWaypointRefreshPx};
+    return BnetPolicy::holdGridWaypoint(in);
 }
 
 void MyUnitImpl::resetGrid()
@@ -508,7 +561,7 @@ bool MyUnitImpl::unstickMoveUnit()
         CherryVis::log(id) << "Unstick by sending stop command";
 #endif
         stop();
-        unstickUntil = currentFrame + BWAPI::Broodwar->getRemainingLatencyFrames();
+        unstickUntil = currentFrame + nextUnstickWait();
         return true;
     }
 

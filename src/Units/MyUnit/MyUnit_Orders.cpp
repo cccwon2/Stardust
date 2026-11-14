@@ -69,21 +69,30 @@ void MyUnitImpl::move(BWAPI::Position position, bool force)
 
         // Battle.net repeated move guard (non-worker units: observers, army). Upstream resends whenever the target moved
         // more than 3px, so per-frame target updates produced one move per unit per frame (~20,000 APM on Battle.net).
-        // Within the command interval (latched latency + 2), a move to within move_resend_tolerance_px of the last
-        // target is skipped. Workers keep their own guard (bnetGuardMoves) and upstream behavior.
+        // Within combat_move_interval_frames (observer_move_interval_frames for observers, never less than the latched
+        // latency + 2), a move to within move_resend_tolerance_px of the last target is skipped, as long as the unit still
+        // has move_guard_min_remaining_px to go towards its last target. Workers keep their own guard (bnetGuardMoves).
         if (!type.isWorker())
         {
             auto &bnetConfig = BnetConfig::get();
-            int interval = bnetConfig.combatMoveGuard ? BnetConfig::commandIntervalFrames() : 0;
+            int interval = bnetConfig.combatMoveGuard
+                           ? BnetPolicy::combatMoveInterval(BnetConfig::commandIntervalFrames(),
+                                                            bnetConfig.combatMoveIntervalFrames,
+                                                            bnetConfig.observerMoveIntervalFrames,
+                                                            type == BWAPI::UnitTypes::Protoss_Observer)
+                           : 0;
+            auto lastTarget = bwapiUnit->getLastCommand().getTargetPosition();
             BnetPolicy::MoveGuardInput guard{
                     bnetConfig.combatMoveGuard && interval > 0,
                     force,
                     bwapiUnit->isStuck(),
                     true,
-                    bwapiUnit->getLastCommand().getTargetPosition().getApproxDistance(position),
+                    lastTarget.getApproxDistance(position),
                     bnetConfig.moveResendTolerancePx,
                     currentFrame - lastCommandFrame,
-                    interval};
+                    interval,
+                    lastPosition.getApproxDistance(lastTarget),
+                    bnetConfig.moveGuardMinRemainingPx};
             if (BnetPolicy::skipRepeatedMove(guard))
             {
                 BnetLog::moveSkipped();
@@ -518,6 +527,22 @@ void MyUnitImpl::unloadAll(BWAPI::Position pos)
         return;
     }
 
+    // Battle.net: don't re-send the same unload-all every frame while it is still in flight (spell_resend_interval_frames)
+    {
+        BWAPI::UnitCommand currentCommand(bwapiUnit->getLastCommand());
+        bool same = currentCommand.getType() == BWAPI::UnitCommandTypes::Unload_All_Position;
+        if (BnetPolicy::skipRepeatedOrder(BnetConfig::commandIntervalFrames() > 0,
+                                          same,
+                                          same ? currentCommand.getTargetPosition().getApproxDistance(pos) : 0,
+                                          32,
+                                          currentFrame - lastCommandFrame,
+                                          BnetConfig::get().spellResendIntervalFrames))
+        {
+            BnetLog::repeatedOrderSkipped();
+            return;
+        }
+    }
+
     issuedOrderThisFrame = bwapiUnit->unloadAll(pos);
 
 #if DEBUG_UNIT_ORDERS
@@ -531,6 +556,22 @@ void MyUnitImpl::unload(BWAPI::Unit cargo)
     {
         Log::Get() << "DUPLICATE ORDER: " << *this << ": Unload " << cargo->getType() << " @ " << cargo->getTilePosition();
         return;
+    }
+
+    // Battle.net: don't re-send the same unload every frame while it is still in flight (spell_resend_interval_frames)
+    {
+        BWAPI::UnitCommand currentCommand(bwapiUnit->getLastCommand());
+        bool same = currentCommand.getType() == BWAPI::UnitCommandTypes::Unload && currentCommand.getTarget() == cargo;
+        if (BnetPolicy::skipRepeatedOrder(BnetConfig::commandIntervalFrames() > 0,
+                                          same,
+                                          0,
+                                          0,
+                                          currentFrame - lastCommandFrame,
+                                          BnetConfig::get().spellResendIntervalFrames))
+        {
+            BnetLog::repeatedOrderSkipped();
+            return;
+        }
     }
 
     issuedOrderThisFrame = bwapiUnit->unload(cargo);

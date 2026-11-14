@@ -26,6 +26,9 @@ namespace BnetConfig
         int naturalCannons = 1;                 // Conditional cannon requests in the natural mineral line once it is taken (0-2)
         int mainCannons = 1;                    // Conditional cannon requests in the main mineral line vs. vultures / mech (0-1);
                                                 // absent key -> 1 if natural_cannons > 0 else 0
+        int mechNaturalCannons = 2;             // Natural target raised to this under a mech / vulture threat (0-2)
+        int expansionCannons = 1;               // Cannons in the mineral line of every other owned base under a mech / vulture threat (0-2)
+        bool cannonThreatPriority = true;       // First cannon (and its pylon) of each base above army production under a threat
         // Aggression multipliers vs. a recognized MidGameBio Terran (AttackBaseSquad), per decision state.
         // Effective values after the compatibility policy in BnetPolicy::resolveBioScales.
         double bioAttackStartScale = 0.7;       // shouldStartAttack (moving -> attacking)
@@ -46,7 +49,14 @@ namespace BnetConfig
 
         // Repeated move guard for non-worker units (observers, army)
         bool combatMoveGuard = true;            // Skip re-sending a move to (nearly) the same target within the command interval
-        int moveResendTolerancePx = 24;         // Targets within this distance of the last move target count as the same
+        int moveResendTolerancePx = 64;         // Targets within this distance of the last move target count as the same
+        int combatMoveIntervalFrames = 12;      // Minimum frames between such moves (at least the latency command interval)
+        int observerMoveIntervalFrames = 24;    // Same for observers following the army
+        int moveGuardMinRemainingPx = 48;       // Never skip once the unit is this close to its last move target
+        bool gridWaypointHold = true;           // Keep the current grid waypoint until close to it (no per-tile re-targeting)
+        int gridWaypointRefreshPx = 64;         // Distance to the waypoint at which the next grid waypoint is sent
+        int spellResendIntervalFrames = 24;     // Minimum frames between identical stasis / unload orders. 0 = off
+        int unstickBackoffMaxFrames = 192;      // Backoff cap for repeatedly stuck workers (stop / move loop). 0 = off
 
         // Phase 3: Lightweight log
         bool printBuildInfo = true;             // Local-only in-game message at game start: build id and config source

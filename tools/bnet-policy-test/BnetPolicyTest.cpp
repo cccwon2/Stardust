@@ -321,6 +321,68 @@ namespace
         m = base; m.lastWasMove = false; CHECK(!skipRepeatedMove(m));
         m = base; m.enabled = false; CHECK(!skipRepeatedMove(m));
         m = base; m.interval = 0; CHECK(!skipRepeatedMove(m));          // low latency: upstream behavior
+
+        // Remaining-path rule: close to the last target, always accept the new target
+        m = base; m.minRemainingPx = 48; m.distUnitToLastTarget = 100; CHECK(skipRepeatedMove(m));
+        m.distUnitToLastTarget = 47; CHECK(!skipRepeatedMove(m));
+
+        // Effective interval
+        CHECK(combatMoveInterval(0, 12, 24, false) == 0);   // not Battle.net: upstream
+        CHECK(combatMoveInterval(7, 12, 24, false) == 12);
+        CHECK(combatMoveInterval(7, 12, 24, true) == 24);
+        CHECK(combatMoveInterval(7, 0, 0, true) == 7);
+        CHECK(combatMoveInterval(8, 5, 6, false) == 8);
+    }
+
+    void testGridHold()
+    {
+        GridHoldInput in{true, true, false, 120, 64};
+        CHECK(holdGridWaypoint(in));
+        auto m = in; m.distToWaypoint = 64; CHECK(!holdGridWaypoint(m));   // close enough: refresh
+        m = in; m.waypointOnPath = false; CHECK(!holdGridWaypoint(m));     // path changed
+        m = in; m.nearGoal = true; CHECK(!holdGridWaypoint(m));            // let upstream switch to the final target
+        m = in; m.enabled = false; CHECK(!holdGridWaypoint(m));
+    }
+
+    void testRepeatedOrder()
+    {
+        CHECK(skipRepeatedOrder(true, true, 0, 48, 3, 24));
+        CHECK(!skipRepeatedOrder(true, true, 0, 48, 24, 24));
+        CHECK(!skipRepeatedOrder(true, true, 49, 48, 3, 24));
+        CHECK(!skipRepeatedOrder(true, false, 0, 48, 3, 24));
+        CHECK(!skipRepeatedOrder(false, true, 0, 48, 3, 24));
+        CHECK(!skipRepeatedOrder(true, true, 0, 48, 3, 0));
+    }
+
+    void testUnstickBackoff()
+    {
+        CHECK(unstickBackoffFrames(0, 3, 192) == 3);
+        CHECK(unstickBackoffFrames(2, 3, 192) == 3);
+        CHECK(unstickBackoffFrames(3, 3, 192) == 24);
+        CHECK(unstickBackoffFrames(4, 3, 192) == 48);
+        CHECK(unstickBackoffFrames(5, 3, 192) == 96);
+        CHECK(unstickBackoffFrames(6, 3, 192) == 192);
+        CHECK(unstickBackoffFrames(20, 3, 192) == 192);
+        CHECK(unstickBackoffFrames(10, 3, 0) == 3);         // backoff disabled
+    }
+
+    void testCannonTargets()
+    {
+        using K = CannonBaseKind;
+        CHECK(cannonTarget(K::Natural, false, 1, 2, 1, 1) == 1);
+        CHECK(cannonTarget(K::Natural, true, 1, 2, 1, 1) == 2);
+        CHECK(cannonTarget(K::Natural, true, 2, 1, 1, 1) == 2);
+        CHECK(cannonTarget(K::Main, false, 1, 2, 1, 1) == 0);
+        CHECK(cannonTarget(K::Main, true, 1, 2, 1, 1) == 1);
+        CHECK(cannonTarget(K::Expansion, false, 1, 2, 1, 2) == 0);
+        CHECK(cannonTarget(K::Expansion, true, 1, 2, 1, 2) == 2);
+        CHECK(cannonTarget(K::Expansion, true, 1, 2, 1, 0) == 0);
+
+        CHECK(cannonRequestUrgent(true, true, 0, 0));
+        CHECK(!cannonRequestUrgent(true, true, 0, 1));     // second cannon stays at normal priority
+        CHECK(!cannonRequestUrgent(true, true, 1, 0));
+        CHECK(!cannonRequestUrgent(true, false, 0, 0));
+        CHECK(!cannonRequestUrgent(false, true, 0, 0));
     }
 }
 
@@ -333,6 +395,10 @@ int main()
     testCannons();
     testMech();
     testMoveGuard();
+    testGridHold();
+    testRepeatedOrder();
+    testUnstickBackoff();
+    testCannonTargets();
 
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

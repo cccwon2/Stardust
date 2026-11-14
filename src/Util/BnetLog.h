@@ -68,6 +68,15 @@ namespace BnetLog
     // Non-worker moves skipped by the repeated move guard (combat_move_guard)
     void moveSkipped();
 
+    // Grid waypoint re-targets avoided by grid_waypoint_hold
+    void gridHold();
+
+    // Unstick stops of repeatedly stuck workers sent with a backoff longer than upstream (unstick_backoff_max_frames)
+    void unstickBackoff();
+
+    // Stasis / unload orders not re-sent because the same order is still in flight (spell_resend_interval_frames)
+    void repeatedOrderSkipped();
+
     // PvT mech expansion gate state change (logged as an [EVENT] line only when the state changes)
     void mechExpandGate(bool blocked, int bases, int armyUnits, int required);
 }

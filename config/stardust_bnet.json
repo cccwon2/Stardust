@@ -13,6 +13,9 @@
   "observer_min_dragoons": 2,
   "natural_cannons": 1,
   "main_cannons": 1,
+  "mech_natural_cannons": 2,
+  "expansion_cannons": 1,
+  "cannon_threat_priority": true,
   "bio_attack_start_scale": 0.7,
   "bio_attack_continue_scale": 1.0,
   "bio_attack_resume_scale": 0.7,
@@ -27,7 +30,14 @@
   "mech_attack_resume_scale": 0.7,
 
   "combat_move_guard": true,
-  "move_resend_tolerance_px": 24,
+  "move_resend_tolerance_px": 64,
+  "combat_move_interval_frames": 12,
+  "observer_move_interval_frames": 24,
+  "move_guard_min_remaining_px": 48,
+  "grid_waypoint_hold": true,
+  "grid_waypoint_refresh_px": 64,
+  "spell_resend_interval_frames": 24,
+  "unstick_backoff_max_frames": 192,
 
   "print_build_info": true,
   "bnet_log": true
