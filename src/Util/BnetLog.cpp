@@ -11,10 +11,61 @@
 #include <fstream>
 #include <sstream>
 
+#ifndef STARDUST_BUILD_ID
+#define STARDUST_BUILD_ID "unknown"
+#endif
+
 extern int currentFrame;
 
 namespace BnetLog
 {
+    const char *buildId()
+    {
+        return STARDUST_BUILD_ID;
+    }
+
+    namespace
+    {
+        std::string buildInfoLine1()
+        {
+            return std::string("Stardust bnet build ") + buildId();
+        }
+
+        std::string buildInfoLine2()
+        {
+            auto &c = BnetConfig::get();
+            std::ostringstream os;
+            os << "config: " << (BnetConfig::loadedFromFile() ? BnetConfig::loadedPath() : std::string("defaults (stardust_bnet.json not found)"))
+               << " | pluto_pvt_snipe=" << c.plutoPvtSnipe
+               << " pvt_mech_fix=" << c.pvtMechFix
+               << " combat_move_guard=" << c.combatMoveGuard;
+            return os.str();
+        }
+
+        const int buildInfoDrawFrames = 24 * 30;  // 30 game seconds
+    }
+
+    void printBuildInfo()
+    {
+        if (!BnetConfig::get().printBuildInfo) return;
+        auto game = BWAPI::BroodwarPtr;
+        if (!game) return;
+
+        game->printf("%s", buildInfoLine1().c_str());
+        game->printf("%s", buildInfoLine2().c_str());
+    }
+
+    void drawBuildInfo()
+    {
+        if (currentFrame >= buildInfoDrawFrames) return;
+        if (!BnetConfig::get().printBuildInfo) return;
+        auto game = BWAPI::BroodwarPtr;
+        if (!game) return;
+
+        game->drawTextScreen(8, 30, "%s", buildInfoLine1().c_str());
+        game->drawTextScreen(8, 42, "%s", buildInfoLine2().c_str());
+    }
+
     namespace
     {
         ResourceOrderStats resourceOrderStats;
@@ -190,7 +241,8 @@ namespace BnetLog
 
         auto game = BWAPI::BroodwarPtr;
         std::ostringstream os;
-        os << "map=\"" << game->mapFileName() << "\""
+        os << "build=" << buildId()
+           << " map=\"" << game->mapFileName() << "\""
            << " opponent=\"" << Opponent::getName() << "\""
            << " enemy_race=" << (game->enemy() ? game->enemy()->getRace().getName() : "Unknown")
            << " latency_frames=" << game->getLatencyFrames()

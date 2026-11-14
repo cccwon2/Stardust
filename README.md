@@ -69,6 +69,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 | `bio_attack_start_scale` | `0.7` | MidGameBio 상대 공격 시작 배율 |
 | `bio_attack_continue_scale` | `1.0` | 공격 유지 배율; 기본값은 원작 유지 판단 |
 | `bio_attack_resume_scale` | `0.7` | 재집결 후 공격 재개 배율 |
+| `print_build_info` | `true` | 게임 시작 시 빌드 ID(브랜치@커밋)와 설정 파일 경로를 내 화면에만 표시 (printf + 처음 30초 화면 그리기) |
 | `bnet_log` | `true` | 경량 경기 로그 활성화 |
 
 순정 PvT UCB1 후보는 이미 `EarlyGameDefense` 하나입니다. 오프닝 고정의 주요 차이는 상대 이름별 이력과 무관한 명시적 선택 및 랜덤 상대의 PvU 탐색 우회입니다. 캐논은 배치 가능 위치·전략 조건·생산 우선순위에 따른 요청이며 건설 보장이 아닙니다.
