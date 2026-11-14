@@ -5,9 +5,10 @@
 
 .DESCRIPTION
     Requirements:
-      - Visual Studio 2022 or 2026 with "Desktop development with C++" (MSVC x86/x64 tools, Windows SDK)
-      - CMake 3.24 or newer, 4.2+ for Visual Studio 2026 (the copy bundled with Visual Studio is preferred)
-    The newest installed Visual Studio 2022/2026 selects the generator; override with -Generator.
+      - Visual Studio 2022 or 2026 with "Desktop development with C++" (MSVC v143 / v145, Windows SDK,
+        C++ CMake tools for Windows). The newest install is used; override with -Generator.
+      - CMake 3.24+ for VS 2022, 4.2+ for VS 2026 (the copy bundled with Visual Studio is found automatically)
+      - An existing build directory configured with another generator needs -Clean.
 
     Compatible with Windows PowerShell 5.1. ASCII only.
 
@@ -25,6 +26,7 @@ param(
     [switch]$VsHuman,
     [switch]$NoBnetLog,
     [switch]$OverwriteConfig,
+    # Optional override, e.g. "Visual Studio 17 2022" or "Visual Studio 18 2026"
     [string]$Generator = ""
 )
 
@@ -35,39 +37,60 @@ function Write-Step([string]$Message) {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
-# Returns @{ Path; Major } for the newest Visual Studio 2022 (17) or 2026 (18) with the x86/x64 C++ tools, or $null
+# Finds the newest Visual Studio 2022 (17.x) or 2026 (18.x) install with the MSVC x86/x64 tools.
+# Returns @{ Path; Major; Generator } or $null.
 function Find-VisualStudio {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
     if (-not (Test-Path $vswhere)) { return $null }
 
-    $vsPath = & $vswhere -latest -version "[17.0,19.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-    $vsVersion = & $vswhere -latest -version "[17.0,19.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion
-    if ((-not $vsPath) -or (-not $vsVersion)) { return $null }
+    $json = & $vswhere -all -prerelease -products * -version "[17.0,19.0)" `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json
+    if (-not $json) { return $null }
+    # PowerShell 5.1 emits a parsed JSON array as one object; enumerate it explicitly
+    $parsed = ($json | Out-String) | ConvertFrom-Json
+    $installs = @($parsed | ForEach-Object { $_ })
+    if ($installs.Count -eq 0) { return $null }
 
-    $vsPath = @($vsPath)[0]
-    $major = [int](@($vsVersion)[0].Split('.')[0])
-    return @{ Path = $vsPath; Major = $major }
+    $best = $installs | Sort-Object { [version]$_.installationVersion } -Descending | Select-Object -First 1
+    $major = ([version]$best.installationVersion).Major
+    $generator = $null
+    if ($major -eq 18) { $generator = "Visual Studio 18 2026" }
+    elseif ($major -eq 17) { $generator = "Visual Studio 17 2022" }
+    if (-not $generator) { return $null }
+
+    return @{ Path = $best.installationPath; Major = $major; Generator = $generator; Name = $best.displayName }
 }
 
-function Get-Generator([int]$Major) {
-    switch ($Major) {
-        17 { return "Visual Studio 17 2022" }
-        18 { return "Visual Studio 18 2026" }
-        default { throw "Unsupported Visual Studio major version $Major" }
-    }
+# Returns $true if the given cmake.exe lists the generator in its --help output
+function Test-CMakeGenerator([string]$CMakePath, [string]$GeneratorName) {
+    $ErrorActionPreference = "Continue"
+    $help = & $CMakePath --help 2>$null | Out-String
+    return ($help -match [regex]::Escape($GeneratorName))
 }
 
-function Find-CMake($Vs) {
-    # Prefer the CMake bundled with the selected Visual Studio: it always knows that Visual Studio's generator
+function Find-CMake([hashtable]$Vs, [string]$GeneratorName) {
+    $candidates = @()
+
+    # Prefer the CMake bundled with the selected Visual Studio (it always supports its own generator)
     if ($Vs) {
-        $candidate = Join-Path $Vs.Path "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
-        if (Test-Path $candidate) { return $candidate }
+        $bundled = Join-Path $Vs.Path "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+        if (Test-Path $bundled) { $candidates += $bundled }
     }
 
     $cmd = Get-Command cmake -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
+    if ($cmd) { $candidates += $cmd.Source }
 
-    throw "cmake.exe not found. Install CMake 3.24+ (4.2+ for Visual Studio 2026) or the C++ CMake tools component of Visual Studio."
+    $programFilesCMake = Join-Path $env:ProgramFiles "CMake\bin\cmake.exe"
+    if (Test-Path $programFilesCMake) { $candidates += $programFilesCMake }
+
+    foreach ($candidate in ($candidates | Select-Object -Unique)) {
+        if (Test-CMakeGenerator $candidate $GeneratorName) { return $candidate }
+        Write-Warning "Skipping $candidate (does not support generator '$GeneratorName')"
+    }
+
+    throw ("cmake.exe with generator '$GeneratorName' not found. " +
+           "In the Visual Studio Installer, add 'C++ CMake tools for Windows' to the 'Desktop development with C++' workload, " +
+           "or install CMake 4.2+ (VS 2026) / 3.24+ (VS 2022) from cmake.org.")
 }
 
 # Repository root = parent of this script's folder
@@ -80,12 +103,15 @@ if (-not [System.IO.Path]::IsPathRooted($BuildDir)) { $BuildDir = Join-Path $Rep
 if (-not [System.IO.Path]::IsPathRooted($DistDir)) { $DistDir = Join-Path $RepoRoot $DistDir }
 
 $Vs = Find-VisualStudio
-if (-not $Vs) {
-    throw "Visual Studio 2022 or 2026 with 'Desktop development with C++' (MSVC x86/x64 tools) was not found."
+if ($Generator -eq "") {
+    if (-not $Vs) {
+        throw ("No Visual Studio 2022/2026 with MSVC x86/x64 tools found. In the Visual Studio Installer, " +
+               "select 'Desktop development with C++' (MSVC build tools, Windows SDK, C++ CMake tools for Windows).")
+    }
+    $Generator = $Vs.Generator
 }
-if (-not $Generator) { $Generator = Get-Generator $Vs.Major }
-$CMake = Find-CMake $Vs
-Write-Host "VS:        $($Vs.Path) (major $($Vs.Major))"
+$CMake = Find-CMake $Vs $Generator
+if ($Vs) { Write-Host "VS:        $($Vs.Name) ($($Vs.Path))" }
 Write-Host "Generator: $Generator"
 Write-Host "CMake:     $CMake"
 Write-Host "Repo:      $RepoRoot"
@@ -102,15 +128,6 @@ $vsHumanValue = "OFF"
 if ($VsHuman) { $vsHumanValue = "ON" }
 $bnetLogValue = "ON"
 if ($NoBnetLog) { $bnetLogValue = "OFF" }
-
-# A build dir configured with another generator cannot be reused
-$cache = Join-Path $BuildDir "CMakeCache.txt"
-if (Test-Path $cache) {
-    $cachedGenerator = Select-String -Path $cache -Pattern '^CMAKE_GENERATOR:INTERNAL=(.*)$' | Select-Object -First 1
-    if ($cachedGenerator -and ($cachedGenerator.Matches[0].Groups[1].Value -ne $Generator)) {
-        throw "$BuildDir was configured with '$($cachedGenerator.Matches[0].Groups[1].Value)'. Re-run with -Clean to switch to '$Generator'."
-    }
-}
 
 Write-Step "Configuring ($Generator, Win32, TOURNAMENT_BUILD=ON, VS_HUMAN=$vsHumanValue, BNET_LOG=$bnetLogValue)"
 & $CMake -S $RepoRoot -B $BuildDir -G $Generator -A Win32 `

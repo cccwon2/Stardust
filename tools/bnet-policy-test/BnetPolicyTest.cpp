@@ -276,6 +276,154 @@ namespace
     }
 }
 
+namespace
+{
+    void testMech()
+    {
+        // Army baseline: upstream divisor 6 vs. mech default 4
+        CHECK(armyBaselineUnits(48, 6) == 8);
+        CHECK(armyBaselineUnits(48, 4) == 12);
+        CHECK(armyBaselineUnits(0, 4) == 0);
+        CHECK(armyBaselineUnits(48, 0) == 0);
+
+        // Zealot target: min(ratio * dragoons, 2 * tanks)
+        CHECK(mechZealotTarget(12, 10, 0.5) == 6);
+        CHECK(mechZealotTarget(12, 2, 0.5) == 4);
+        CHECK(mechZealotTarget(12, 10, 0.0) == 0);
+        CHECK(mechZealotTarget(3, 10, 0.5) == 1);
+        CHECK(mechZealotTarget(-1, 10, 0.5) == 0);
+
+        // Expansion gate: bases 1-2 never gated, 3+ need perBase * bases
+        CHECK(mechExpansionAllowed(2, 0, 6));
+        CHECK(!mechExpansionAllowed(3, 17, 6));
+        CHECK(mechExpansionAllowed(3, 18, 6));
+        CHECK(!mechExpansionAllowed(4, 23, 6));
+        CHECK(mechExpansionAllowed(4, 0, 0));    // disabled
+
+        CHECK(!mechLuxuryUpgradeAllowed(19, 20));
+        CHECK(mechLuxuryUpgradeAllowed(20, 20));
+        CHECK(mechLuxuryUpgradeAllowed(0, 0));
+    }
+
+    void testMoveGuard()
+    {
+        CHECK(autoCommandInterval(3) == 0);
+        CHECK(autoCommandInterval(4) == 0);
+        CHECK(autoCommandInterval(5) == 7);
+        CHECK(autoCommandInterval(6) == 8);
+
+        MoveGuardInput base{true, false, false, true, 4, 24, 1, 7};
+        CHECK(skipRepeatedMove(base));                                  // observer creeping 4px/frame: skipped
+        auto m = base; m.framesSinceLastCommand = 7; CHECK(!skipRepeatedMove(m));   // interval elapsed: resend
+        m = base; m.distToLastTarget = 25; CHECK(!skipRepeatedMove(m)); // new target: send
+        m = base; m.force = true; CHECK(!skipRepeatedMove(m));
+        m = base; m.stuck = true; CHECK(!skipRepeatedMove(m));
+        m = base; m.lastWasMove = false; CHECK(!skipRepeatedMove(m));
+        m = base; m.enabled = false; CHECK(!skipRepeatedMove(m));
+        m = base; m.interval = 0; CHECK(!skipRepeatedMove(m));          // low latency: upstream behavior
+
+        // Remaining-path rule: close to the last target, always accept the new target
+        m = base; m.minRemainingPx = 48; m.distUnitToLastTarget = 100; CHECK(skipRepeatedMove(m));
+        m.distUnitToLastTarget = 47; CHECK(!skipRepeatedMove(m));
+
+        // Effective interval
+        CHECK(combatMoveInterval(0, 12, 24, false) == 0);   // not Battle.net: upstream
+        CHECK(combatMoveInterval(7, 12, 24, false) == 12);
+        CHECK(combatMoveInterval(7, 12, 24, true) == 24);
+        CHECK(combatMoveInterval(7, 0, 0, true) == 7);
+        CHECK(combatMoveInterval(8, 5, 6, false) == 8);
+    }
+
+    void testGridHold()
+    {
+        GridHoldInput in{true, true, false, 120, 64};
+        CHECK(holdGridWaypoint(in));
+        auto m = in; m.distToWaypoint = 64; CHECK(!holdGridWaypoint(m));   // close enough: refresh
+        m = in; m.waypointOnPath = false; CHECK(!holdGridWaypoint(m));     // path changed
+        m = in; m.nearGoal = true; CHECK(!holdGridWaypoint(m));            // let upstream switch to the final target
+        m = in; m.enabled = false; CHECK(!holdGridWaypoint(m));
+    }
+
+    void testRepeatedOrder()
+    {
+        CHECK(skipRepeatedOrder(true, true, 0, 48, 3, 24));
+        CHECK(!skipRepeatedOrder(true, true, 0, 48, 24, 24));
+        CHECK(!skipRepeatedOrder(true, true, 49, 48, 3, 24));
+        CHECK(!skipRepeatedOrder(true, false, 0, 48, 3, 24));
+        CHECK(!skipRepeatedOrder(false, true, 0, 48, 3, 24));
+        CHECK(!skipRepeatedOrder(true, true, 0, 48, 3, 0));
+    }
+
+    void testUnstickBackoff()
+    {
+        CHECK(unstickBackoffFrames(0, 3, 192) == 3);
+        CHECK(unstickBackoffFrames(2, 3, 192) == 3);
+        CHECK(unstickBackoffFrames(3, 3, 192) == 24);
+        CHECK(unstickBackoffFrames(4, 3, 192) == 48);
+        CHECK(unstickBackoffFrames(5, 3, 192) == 96);
+        CHECK(unstickBackoffFrames(6, 3, 192) == 192);
+        CHECK(unstickBackoffFrames(20, 3, 192) == 192);
+        CHECK(unstickBackoffFrames(10, 3, 0) == 3);         // backoff disabled
+    }
+
+    void testCannonTargets()
+    {
+        using K = CannonBaseKind;
+        CHECK(cannonTarget(K::Natural, false, 1, 2, 1, 1) == 1);
+        CHECK(cannonTarget(K::Natural, true, 1, 2, 1, 1) == 2);
+        CHECK(cannonTarget(K::Natural, true, 2, 1, 1, 1) == 2);
+        CHECK(cannonTarget(K::Main, false, 1, 2, 1, 1) == 0);
+        CHECK(cannonTarget(K::Main, true, 1, 2, 1, 1) == 1);
+        CHECK(cannonTarget(K::Expansion, false, 1, 2, 1, 2) == 0);
+        CHECK(cannonTarget(K::Expansion, true, 1, 2, 1, 2) == 2);
+        CHECK(cannonTarget(K::Expansion, true, 1, 2, 1, 0) == 0);
+
+        CHECK(cannonRequestUrgent(true, true, 0, 0));
+        CHECK(!cannonRequestUrgent(true, true, 0, 1));     // second cannon stays at normal priority
+        CHECK(!cannonRequestUrgent(true, true, 1, 0));
+        CHECK(!cannonRequestUrgent(true, false, 0, 0));
+        CHECK(!cannonRequestUrgent(false, true, 0, 0));
+    }
+
+    void testPvzAllIn()
+    {
+        // 2026-11-15 Radeon replay: 12 pool, speedlings at the natural around frame 5700
+        CHECK(pvzAllInByLings(true, true, 5700, 6, 6, 6, 12));
+        CHECK(!pvzAllInByLings(true, true, 5700, 5, 6, 6, 12));
+        CHECK(pvzAllInByLings(true, true, 5000, 0, 12, 6, 12));
+        CHECK(!pvzAllInByLings(true, true, 8000, 0, 12, 6, 12));    // seen-lings rule ends at frame 8000
+        CHECK(pvzAllInByLings(true, true, 8999, 6, 0, 6, 12));
+        CHECK(!pvzAllInByLings(true, true, 9000, 6, 0, 6, 12));     // base-lings rule ends at frame 9000
+        CHECK(!pvzAllInByLings(true, false, 5700, 10, 20, 6, 12));  // opening not known yet
+        CHECK(!pvzAllInByLings(false, true, 5700, 10, 20, 6, 12));
+        CHECK(!pvzAllInByLings(true, true, 5700, 10, 20, 0, 0));    // both rules off
+
+        CHECK(!pvzAllInLatchActive(-1, 6000));
+        CHECK(pvzAllInLatchActive(5700, 6000));
+        CHECK(pvzAllInLatchActive(5700, 9999));
+        CHECK(!pvzAllInLatchActive(5700, 10000));
+        CHECK(!pvzAllInLatchActive(5700, 100));                     // new game started (frame went back)
+
+        CHECK(pvzWallCannonTarget(true, true, 3) == 3);
+        CHECK(pvzWallCannonTarget(true, false, 3) == 2);
+        CHECK(pvzWallCannonTarget(false, true, 5) == 2);
+        CHECK(pvzWallCannonTarget(true, true, 2) == 2);
+
+        CHECK(pvzMinZealots(true, true, false, 2, 4, 30) == 2);
+        CHECK(pvzMinZealots(true, false, false, 2, 4, 30) == 0);
+        CHECK(pvzMinZealots(true, true, true, 2, 4, 3) == 4);
+        CHECK(pvzMinZealots(true, true, true, 2, 4, 16) == 6);
+        CHECK(pvzMinZealots(true, true, true, 2, 4, 60) == 8);      // capped
+        CHECK(pvzMinZealots(true, true, true, 6, 0, 0) == 6);
+        CHECK(pvzMinZealots(false, true, true, 2, 4, 30) == 0);
+
+        CHECK(pvzProbeCap(true, true, 18) == 18);
+        CHECK(pvzProbeCap(true, false, 18) == 0);
+        CHECK(pvzProbeCap(true, true, 0) == 0);
+        CHECK(pvzProbeCap(false, true, 18) == 0);
+    }
+}
+
 int main()
 {
     testStuck();
@@ -283,6 +431,13 @@ int main()
     testDetection();
     testBioScales();
     testCannons();
+    testMech();
+    testMoveGuard();
+    testGridHold();
+    testRepeatedOrder();
+    testUnstickBackoff();
+    testCannonTargets();
+    testPvzAllIn();
 
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

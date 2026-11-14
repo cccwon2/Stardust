@@ -1,4 +1,7 @@
 #include "MyUnit.h"
+#include "BnetLog.h"
+#include "BnetConfig.h"
+#include "BnetPolicy.h"
 
 #include "UnitUtil.h"
 #include "Units.h"
@@ -123,6 +126,15 @@ void MyUnitImpl::update(BWAPI::Unit unit)
     }
 
     UnitImpl::update(unit);
+
+    // Battle.net log: count the order issued to this unit on the previous frame (BWAPI's getAPM is 0 on Remastered)
+    if (issuedOrderThisFrame)
+    {
+        BnetLog::countIssuedOrder(type.isWorker()
+                                  ? BnetLog::OrderCategory::Worker
+                                  : (type == BWAPI::UnitTypes::Protoss_Observer ? BnetLog::OrderCategory::Observer
+                                                                                 : BnetLog::OrderCategory::Army));
+    }
 
     issuedOrderThisFrame = false;
     moveCommand = nullptr;
@@ -287,11 +299,39 @@ bool MyUnitImpl::unstick()
 #endif
 
         stop();
-        unstickUntil = currentFrame + BWAPI::Broodwar->getRemainingLatencyFrames();
+        unstickUntil = currentFrame + nextUnstickWait();
         return true;
     }
 
     return false;
+}
+
+int MyUnitImpl::nextUnstickWait()
+{
+    int base = BWAPI::Broodwar->getRemainingLatencyFrames();
+
+    // Battle.net only, workers only: a trapped worker used to get a stop + move every ~12 frames for minutes.
+    // Army units keep upstream timing, since callers also use unstick() before attacking.
+    int maxFrames = BnetConfig::get().unstickBackoffMaxFrames;
+    if (!type.isWorker() || maxFrames <= 0 || BnetConfig::commandIntervalFrames() <= 0)
+    {
+        unstickAttempts = 0;
+        return base;
+    }
+
+    if (unstickAttempts > 0 && unstickAttemptPosition.isValid() && lastPosition.getApproxDistance(unstickAttemptPosition) <= 32)
+    {
+        unstickAttempts++;
+    }
+    else
+    {
+        unstickAttempts = 1;
+        unstickAttemptPosition = lastPosition;
+    }
+
+    int wait = BnetPolicy::unstickBackoffFrames(unstickAttempts, base, maxFrames);
+    if (wait > base) BnetLog::unstickBackoff();
+    return wait;
 }
 
 BWAPI::Position MyUnitImpl::simulatePosition(int frames) const

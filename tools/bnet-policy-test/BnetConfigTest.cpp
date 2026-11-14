@@ -33,6 +33,39 @@ int main(){
   w("{\"natural_cannons\": 0, \"main_cannons\": 1}");
   BnetConfig::initialize(); c=BnetConfig::get();
   C(c.naturalCannons==0 && c.mainCannons==1);
+  // pvt_mech_fix defaults and clamping
+  std::filesystem::remove_all("bwapi-data");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.pvtMechFix && c.mechWorkersPerArmyUnit==4 && c.mechZealotRatio==0.5 && c.mechExpandArmyPerBase==6);
+  C(c.mechLuxuryUpgradeMinArmy==20 && c.mechAttackStartScale==0.7 && c.mechAttackContinueScale==1.0 && c.mechAttackResumeScale==0.7);
+  C(c.combatMoveGuard && c.moveResendTolerancePx==64);
+  w("{\"pvt_mech_fix\": false, \"mech_workers_per_army_unit\": 1, \"mech_zealot_ratio\": 9, \"mech_expand_army_per_base\": -2, \"move_resend_tolerance_px\": 500, \"combat_move_guard\": false, \"mech_attack_start_scale\": 0.5}");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(!c.pvtMechFix && c.mechWorkersPerArmyUnit==2 && c.mechZealotRatio==1.5 && c.mechExpandArmyPerBase==0);
+  C(c.moveResendTolerancePx==192 && !c.combatMoveGuard && c.mechAttackStartScale==0.5);
+  C(BnetConfig::commandIntervalFrames()==0 && BnetConfig::maxLatencyFrames()==0);   // no game: guard inactive
+  // APM / cannon keys added after the PvT mech fix
+  std::filesystem::remove_all("bwapi-data");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.combatMoveIntervalFrames==12 && c.observerMoveIntervalFrames==24 && c.moveGuardMinRemainingPx==48);
+  C(c.gridWaypointHold && c.gridWaypointRefreshPx==64 && c.spellResendIntervalFrames==24 && c.unstickBackoffMaxFrames==192);
+  C(c.mechNaturalCannons==2 && c.expansionCannons==1 && c.cannonThreatPriority);
+  w("{\"expansion_cannons\": 5, \"mech_natural_cannons\": -1, \"grid_waypoint_refresh_px\": 1, \"combat_move_interval_frames\": 99, \"observer_move_interval_frames\": 999, \"unstick_backoff_max_frames\": 0, \"grid_waypoint_hold\": false, \"cannon_threat_priority\": false}");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.expansionCannons==2 && c.mechNaturalCannons==0 && c.gridWaypointRefreshPx==16 && c.combatMoveIntervalFrames==48);
+  C(c.observerMoveIntervalFrames==96 && c.unstickBackoffMaxFrames==0 && !c.gridWaypointHold && !c.cannonThreatPriority);
+  // PvZ anti all-in keys
+  std::filesystem::remove_all("bwapi-data");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.forcedPvzOpening=="FFEDragoons" && c.pvzAntiAllinFix && c.pvzAllinBaseLings==6 && c.pvzAllinSeenLings==12);
+  C(c.pvzPoolFirstCannons==3 && c.pvzPoolFirstZealots==2 && c.pvzAllinZealots==4 && c.pvzAllinProbeCap==18);
+  w("{\"forced_pvz_opening\": \"\", \"pvz_antiallin_fix\": false, \"pvz_allin_base_lings\": -1, \"pvz_allin_seen_lings\": 99, \"pvz_pool_first_cannons\": 9, \"pvz_pool_first_zealots\": -2, \"pvz_allin_zealots\": 50, \"pvz_allin_probe_cap\": 3}");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.forcedPvzOpening.empty() && !c.pvzAntiAllinFix && c.pvzAllinBaseLings==0 && c.pvzAllinSeenLings==40);
+  C(c.pvzPoolFirstCannons==5 && c.pvzPoolFirstZealots==0 && c.pvzAllinZealots==12 && c.pvzAllinProbeCap==12);
+  w("{\"pvz_allin_probe_cap\": 0, \"pvz_pool_first_cannons\": 1}");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.pvzAllinProbeCap==0 && c.pvzPoolFirstCannons==2);
   printf("%s\n", BnetConfig::summary().c_str());
   printf("fails=%d\n",fails); return fails;
 }

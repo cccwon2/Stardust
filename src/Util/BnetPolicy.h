@@ -239,4 +239,231 @@ namespace BnetPolicy
         if (mainKeyPresent) return mainCannons;
         return naturalCannons > 0 ? 1 : 0;
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // PvT vs. MidGameMech (pvt_mech_fix)
+    // ---------------------------------------------------------------------------------------------
+
+    // Baseline main-army units requested above other production: one per `workersPerUnit` mineral workers
+    // (upstream uses 6). Non-positive divisor disables the baseline.
+    inline int armyBaselineUnits(int mineralWorkers, int workersPerUnit)
+    {
+        if (workersPerUnit <= 0 || mineralWorkers <= 0) return 0;
+        return mineralWorkers / workersPerUnit;
+    }
+
+    // Desired zealot count against mech: at most `ratio` zealots per dragoon and at most two per enemy tank.
+    // Upstream used min(1.5 * dragoons, 3 * tanks) (min(dragoons, 2 * tanks) with many vultures).
+    inline int mechZealotTarget(int dragoons, int enemyTanks, double ratio)
+    {
+        if (dragoons < 0) dragoons = 0;
+        if (enemyTanks < 0) enemyTanks = 0;
+        if (ratio < 0.0) ratio = 0.0;
+        int byRatio = (int)(dragoons * ratio);
+        int byTanks = enemyTanks * 2;
+        return byRatio < byTanks ? byRatio : byTanks;
+    }
+
+    // Whether a new normal expansion may be queued against mech. The first three bases are never gated; from the
+    // fourth on, the army (completed zealots + dragoons) must be at least `armyPerBase` units per base we own.
+    // armyPerBase <= 0 disables the gate.
+    inline bool mechExpansionAllowed(int ownedBases, int armyUnits, int armyPerBase)
+    {
+        if (armyPerBase <= 0) return true;
+        if (ownedBases < 3) return true;
+        return armyUnits >= armyPerBase * ownedBases;
+    }
+
+    // Luxury upgrades (observer speed / sight, shuttle speed) are deferred against mech until the army reaches
+    // `minArmy` units. minArmy <= 0 disables the deferral.
+    inline bool mechLuxuryUpgradeAllowed(int armyUnits, int minArmy)
+    {
+        if (minArmy <= 0) return true;
+        return armyUnits >= minArmy;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Command interval and repeated move guard
+    // ---------------------------------------------------------------------------------------------
+
+    // Auto min_command_interval_frames from the highest latency observed this game. Remastered can report 5 at game
+    // start and 3 later; latching the maximum keeps the guard from silently turning off mid-game.
+    inline int autoCommandInterval(int maxLatencyFrames)
+    {
+        return maxLatencyFrames > 4 ? maxLatencyFrames + 2 : 0;
+    }
+
+    struct MoveGuardInput
+    {
+        bool enabled;               // combat_move_guard and interval > 0
+        bool force;                 // Caller forced the move
+        bool stuck;                 // BWAPI reports the unit stuck
+        bool lastWasMove;           // The last command was a Move
+        int distToLastTarget;       // Approx distance between the new and the last move target (px)
+        int tolerance;              // move_resend_tolerance_px
+        int framesSinceLastCommand;
+        int interval;               // Effective command interval in frames
+        int distUnitToLastTarget = 1 << 20;   // Distance from the unit to the last move target (px)
+        int minRemainingPx = 0;               // Only skip while the unit still has at least this far to go
+    };
+
+    // Whether a non-worker move to (nearly) the same target as the last move should be skipped because it was sent
+    // less than `interval` frames ago. Upstream resends whenever the target moved more than 3px, which with per-frame
+    // target updates means one move per unit per frame (~20,000 APM observed on Battle.net).
+    inline bool skipRepeatedMove(const MoveGuardInput &in)
+    {
+        if (!in.enabled || in.force || in.stuck || !in.lastWasMove) return false;
+        if (in.interval <= 0) return false;
+        if (in.distToLastTarget > in.tolerance) return false;
+        // Never let the unit run out of path: once it is close to its last target, accept the new one immediately
+        if (in.distUnitToLastTarget < in.minRemainingPx) return false;
+        return in.framesSinceLastCommand < in.interval;
+    }
+
+    // Effective interval for the non-worker move guard: only active when the latency-based command interval is active
+    // (Battle.net), then at least combat_move_interval_frames, or observer_move_interval_frames for observers.
+    inline int combatMoveInterval(int commandInterval, int combatInterval, int observerInterval, bool isObserver)
+    {
+        if (commandInterval <= 0) return 0;
+        int result = commandInterval;
+        if (combatInterval > result) result = combatInterval;
+        if (isObserver && observerInterval > result) result = observerInterval;
+        return result;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Grid waypoint hold
+    // ---------------------------------------------------------------------------------------------
+
+    // Upstream grid navigation moves towards the node 5 tiles ahead and re-targets every time the unit enters a new tile,
+    // i.e. one move per tile (~every 6-8 frames for a dragoon). Keep the current waypoint while it is still on the path
+    // ahead and the unit is not yet close to it, so the move is only refreshed every few tiles.
+    struct GridHoldInput
+    {
+        bool enabled;               // grid_waypoint_hold and Battle.net command interval active
+        bool waypointOnPath;        // Current waypoint is one of the next nodes from the unit's current grid node
+        bool nearGoal;              // Current grid node is close to the grid goal (switch to the final target soon)
+        int distToWaypoint;         // Distance from the unit to the current waypoint (px)
+        int refreshPx;              // grid_waypoint_refresh_px
+    };
+
+    inline bool holdGridWaypoint(const GridHoldInput &in)
+    {
+        if (!in.enabled || !in.waypointOnPath || in.nearGoal) return false;
+        return in.distToWaypoint > in.refreshPx;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Repeated spell / unload guard
+    // ---------------------------------------------------------------------------------------------
+
+    // Whether the same targeted order (stasis, unload) was sent recently enough that re-sending it now only adds APM.
+    // Upstream re-sent stasis every frame (148 casts in one replay) and shuttle unloads every frame.
+    inline bool skipRepeatedOrder(bool enabled, bool sameOrder, int distToLastTarget, int tolerance, int framesSinceLastCommand,
+                                  int interval)
+    {
+        if (!enabled || !sameOrder || interval <= 0) return false;
+        if (distToLastTarget > tolerance) return false;
+        return framesSinceLastCommand < interval;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Stuck worker backoff
+    // ---------------------------------------------------------------------------------------------
+
+    // Frames to wait after an unstick stop before the next normal command, given how many consecutive unstick attempts
+    // were made without the unit moving. Upstream retried every ~12 frames forever (a trapped probe sent 323 stops and
+    // 619 moves in 3 minutes). The first two attempts keep upstream timing; then 24, 48, 96, capped at maxFrames.
+    inline int unstickBackoffFrames(int consecutiveAttempts, int baseFrames, int maxFrames)
+    {
+        if (consecutiveAttempts <= 2) return baseFrames;
+        int wait = 24;
+        for (int i = 3; i < consecutiveAttempts && wait < maxFrames; i++) wait *= 2;
+        if (wait > maxFrames) wait = maxFrames;
+        return wait > baseFrames ? wait : baseFrames;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Expansion / natural cannons vs. mech
+    // ---------------------------------------------------------------------------------------------
+
+    enum class CannonBaseKind { Main, Natural, Expansion };
+
+    // Target cannon count for a base. Natural: natural_cannons, raised to mech_natural_cannons under a mech / vulture threat.
+    // Main: main_cannons under a mech threat. Other bases: expansion_cannons under a mech threat.
+    inline int cannonTarget(CannonBaseKind kind, bool mechThreat, int naturalCannons, int mechNaturalCannons, int mainCannons,
+                            int expansionCannons)
+    {
+        switch (kind)
+        {
+            case CannonBaseKind::Natural:
+                return (mechThreat && mechNaturalCannons > naturalCannons) ? mechNaturalCannons : naturalCannons;
+            case CannonBaseKind::Main:
+                return mechThreat ? mainCannons : 0;
+            case CannonBaseKind::Expansion:
+                return mechThreat ? expansionCannons : 0;
+        }
+        return 0;
+    }
+
+    // Whether the next cannon request at a base should be raised above army production: only the first cannon of a base
+    // that has none completed or pending, and only under a vulture / mech threat.
+    inline bool cannonRequestUrgent(bool threatPriority, bool mechThreat, int existingOrPending, int requestIndex)
+    {
+        return threatPriority && mechThreat && existingOrPending + requestIndex == 0;
+    }
+    // ---------------------------------------------------------------------------------------------
+    // PvZ vs. zergling all-ins
+    // ---------------------------------------------------------------------------------------------
+
+    // Frames after which the extra all-in rules no longer trigger and an existing latch expires
+    constexpr int PvzAllInBaseLingsUntilFrame = 9000;
+    constexpr int PvzAllInSeenLingsUntilFrame = 8000;
+    constexpr int PvzAllInLatchUntilFrame = 10000;
+
+    // Extra all-in confirmation on top of the upstream timing rules, which only count zerglings by their estimated creation
+    // frame and so confirmed the 12-pool speedling all-in of 2026-11-15 only after it had broken the natural (frame 6782).
+    // Only once the opening is known (pool or hatchery first): zerglings at our main / natural, or many living zerglings.
+    inline bool pvzAllInByLings(bool enabled, bool openingKnown, int frame, int lingsAtOurBases, int lingsAlive,
+                                int baseThreshold, int seenThreshold)
+    {
+        if (!enabled || !openingKnown) return false;
+        if (baseThreshold > 0 && frame < PvzAllInBaseLingsUntilFrame && lingsAtOurBases >= baseThreshold) return true;
+        if (seenThreshold > 0 && frame < PvzAllInSeenLingsUntilFrame && lingsAlive >= seenThreshold) return true;
+        return false;
+    }
+
+    // Whether a latched all-in confirmation still holds (latchFrame < 0 = not latched)
+    inline bool pvzAllInLatchActive(int latchFrame, int frame)
+    {
+        return latchFrame >= 0 && frame >= latchFrame && frame < PvzAllInLatchUntilFrame;
+    }
+
+    // FFE wall cannon target: upstream 2, raised to pool_first_cannons vs. pool first or an all-in
+    // (the all-in schedule itself is upstream: up to 5 by frame 6000)
+    inline int pvzWallCannonTarget(bool enabled, bool poolFirstOrAllIn, int poolFirstCannons)
+    {
+        if (!enabled || !poolFirstOrAllIn) return 2;
+        return poolFirstCannons > 2 ? poolFirstCannons : 2;
+    }
+
+    // FFEDragoons minimum zealots: pool first -> pool_first_zealots; all-in -> allin_zealots or one per three known lings (at most 8)
+    inline int pvzMinZealots(bool enabled, bool poolFirst, bool allIn, int poolFirstZealots, int allInZealots, int enemyLings)
+    {
+        if (!enabled) return 0;
+        if (allIn)
+        {
+            int byLings = (enemyLings + 2) / 3;
+            if (byLings > 8) byLings = 8;   // the rest stays at upstream base-defense priority
+            int target = allInZealots > byLings ? allInZealots : byLings;
+            return target > poolFirstZealots ? target : poolFirstZealots;
+        }
+        return poolFirst ? poolFirstZealots : 0;
+    }
+
+    // Probe count above which FFE probe production is moved below zealots during an all-in (0 = no cap)
+    inline int pvzProbeCap(bool enabled, bool allIn, int cap)
+    {
+        return (enabled && allIn && cap > 0) ? cap : 0;
+    }
 }

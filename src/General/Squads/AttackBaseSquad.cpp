@@ -21,8 +21,8 @@ namespace
     // Applied after the reinforcement factor and before the natural-defense bonus in each decision function.
     enum class BioDecision { Start, Continue, Resume };
 
-    // Whether the MidGameBio per-state scales apply right now
-    bool bnetBioScalesActive()
+    // Whether the enemy is Terran and currently recognized as the given strategy (pluto_pvt_snipe on)
+    bool bnetEnemyStrategyIs(const char *strategy)
     {
         if (!BnetConfig::get().plutoPvtSnipe) return false;
 
@@ -30,19 +30,42 @@ namespace
         if (!enemy || enemy->getRace() != BWAPI::Races::Terran) return false;
 
         auto engine = Strategist::getStrategyEngine();
-        return engine && engine->getEnemyStrategy() == "MidGameBio";
+        return engine && engine->getEnemyStrategy() == strategy;
+    }
+
+    // Whether the MidGameBio per-state scales apply right now
+    bool bnetBioScalesActive()
+    {
+        return bnetEnemyStrategyIs("MidGameBio");
+    }
+
+    // Whether the MidGameMech per-state scales apply right now (pvt_mech_fix). Same decision points as bio: small groups
+    // should not start or resume attacks into sieged tanks and mines.
+    bool bnetMechScalesActive()
+    {
+        return BnetConfig::get().pvtMechFix && bnetEnemyStrategyIs("MidGameMech");
     }
 
     double bnetAggressionScale(BioDecision decision)
     {
-        if (!bnetBioScalesActive()) return 1.0;
-
         auto &bnetConfig = BnetConfig::get();
-        switch (decision)
+        if (bnetBioScalesActive())
         {
-            case BioDecision::Start: return bnetConfig.bioAttackStartScale;
-            case BioDecision::Continue: return bnetConfig.bioAttackContinueScale;
-            case BioDecision::Resume: return bnetConfig.bioAttackResumeScale;
+            switch (decision)
+            {
+                case BioDecision::Start: return bnetConfig.bioAttackStartScale;
+                case BioDecision::Continue: return bnetConfig.bioAttackContinueScale;
+                case BioDecision::Resume: return bnetConfig.bioAttackResumeScale;
+            }
+        }
+        if (bnetMechScalesActive())
+        {
+            switch (decision)
+            {
+                case BioDecision::Start: return bnetConfig.mechAttackStartScale;
+                case BioDecision::Continue: return bnetConfig.mechAttackContinueScale;
+                case BioDecision::Resume: return bnetConfig.mechAttackResumeScale;
+            }
         }
         return 1.0;
     }
@@ -479,6 +502,7 @@ void AttackBaseSquad::execute(UnitCluster &cluster)
 
     // Battle.net summary counters: attack <-> regroup transitions while the MidGameBio scales are active
     if (bnetBioScalesActive()) BnetLog::bioDecision(wasAttacking, attack || ignoreCombatSim);
+    if (bnetMechScalesActive()) BnetLog::mechDecision(wasAttacking, attack || ignoreCombatSim);
 
     if (attack || ignoreCombatSim)
     {

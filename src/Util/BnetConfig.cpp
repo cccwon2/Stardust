@@ -16,6 +16,7 @@ namespace BnetConfig
         Config config;
         bool fromFile = false;
         bool mainCannonsPresent = false;
+        int maxLatency = 0;
         std::string path;
 
         const char *candidatePaths[] = {
@@ -107,6 +108,7 @@ namespace BnetConfig
     void initialize()
     {
         config = Config();
+        maxLatency = 0;
         fromFile = false;
         mainCannonsPresent = false;
         path.clear();
@@ -140,6 +142,9 @@ namespace BnetConfig
                 read(json, "observer_min_dragoons", config.observerMinDragoons);
                 read(json, "natural_cannons", config.naturalCannons);
                 mainCannonsPresent = readPresent(json, "main_cannons", config.mainCannons);
+                read(json, "mech_natural_cannons", config.mechNaturalCannons);
+                read(json, "expansion_cannons", config.expansionCannons);
+                read(json, "cannon_threat_priority", config.cannonThreatPriority);
                 BnetPolicy::BioScaleKeys bioKeys;
                 bioKeys.hasLegacy = readPresent(json, "bio_aggression_scale", bioKeys.legacy);
                 bioKeys.hasStart = readPresent(json, "bio_attack_start_scale", bioKeys.start);
@@ -151,6 +156,32 @@ namespace BnetConfig
                 config.bioAttackResumeScale = bioScales.resume;
                 config.bioLegacyKeyPresent = bioKeys.hasLegacy;
                 config.bioLegacyScale = bioKeys.legacy;
+                read(json, "pvt_mech_fix", config.pvtMechFix);
+                read(json, "mech_workers_per_army_unit", config.mechWorkersPerArmyUnit);
+                read(json, "mech_zealot_ratio", config.mechZealotRatio);
+                read(json, "mech_expand_army_per_base", config.mechExpandArmyPerBase);
+                read(json, "mech_luxury_upgrade_min_army", config.mechLuxuryUpgradeMinArmy);
+                read(json, "mech_attack_start_scale", config.mechAttackStartScale);
+                read(json, "mech_attack_continue_scale", config.mechAttackContinueScale);
+                read(json, "mech_attack_resume_scale", config.mechAttackResumeScale);
+                read(json, "combat_move_guard", config.combatMoveGuard);
+                read(json, "move_resend_tolerance_px", config.moveResendTolerancePx);
+                read(json, "combat_move_interval_frames", config.combatMoveIntervalFrames);
+                read(json, "observer_move_interval_frames", config.observerMoveIntervalFrames);
+                read(json, "move_guard_min_remaining_px", config.moveGuardMinRemainingPx);
+                read(json, "grid_waypoint_hold", config.gridWaypointHold);
+                read(json, "grid_waypoint_refresh_px", config.gridWaypointRefreshPx);
+                read(json, "spell_resend_interval_frames", config.spellResendIntervalFrames);
+                read(json, "unstick_backoff_max_frames", config.unstickBackoffMaxFrames);
+                read(json, "forced_pvz_opening", config.forcedPvzOpening);
+                read(json, "pvz_antiallin_fix", config.pvzAntiAllinFix);
+                read(json, "pvz_allin_base_lings", config.pvzAllinBaseLings);
+                read(json, "pvz_allin_seen_lings", config.pvzAllinSeenLings);
+                read(json, "pvz_pool_first_cannons", config.pvzPoolFirstCannons);
+                read(json, "pvz_pool_first_zealots", config.pvzPoolFirstZealots);
+                read(json, "pvz_allin_zealots", config.pvzAllinZealots);
+                read(json, "pvz_allin_probe_cap", config.pvzAllinProbeCap);
+                read(json, "print_build_info", config.printBuildInfo);
                 read(json, "bnet_log", config.bnetLog);
 
                 fromFile = true;
@@ -177,6 +208,28 @@ namespace BnetConfig
         config.bioAttackStartScale = std::clamp(config.bioAttackStartScale, 0.1, 2.0);
         config.bioAttackContinueScale = std::clamp(config.bioAttackContinueScale, 0.1, 2.0);
         config.bioAttackResumeScale = std::clamp(config.bioAttackResumeScale, 0.1, 2.0);
+        config.mechWorkersPerArmyUnit = std::clamp(config.mechWorkersPerArmyUnit, 2, 12);
+        config.mechZealotRatio = std::clamp(config.mechZealotRatio, 0.0, 1.5);
+        config.mechExpandArmyPerBase = std::clamp(config.mechExpandArmyPerBase, 0, 20);
+        config.mechLuxuryUpgradeMinArmy = std::clamp(config.mechLuxuryUpgradeMinArmy, 0, 60);
+        config.mechAttackStartScale = std::clamp(config.mechAttackStartScale, 0.1, 2.0);
+        config.mechAttackContinueScale = std::clamp(config.mechAttackContinueScale, 0.1, 2.0);
+        config.mechAttackResumeScale = std::clamp(config.mechAttackResumeScale, 0.1, 2.0);
+        config.moveResendTolerancePx = std::clamp(config.moveResendTolerancePx, 3, 192);
+        config.mechNaturalCannons = std::clamp(config.mechNaturalCannons, 0, 2);
+        config.expansionCannons = std::clamp(config.expansionCannons, 0, 2);
+        config.combatMoveIntervalFrames = std::clamp(config.combatMoveIntervalFrames, 0, 48);
+        config.observerMoveIntervalFrames = std::clamp(config.observerMoveIntervalFrames, 0, 96);
+        config.moveGuardMinRemainingPx = std::clamp(config.moveGuardMinRemainingPx, 0, 256);
+        config.gridWaypointRefreshPx = std::clamp(config.gridWaypointRefreshPx, 16, 160);
+        config.spellResendIntervalFrames = std::clamp(config.spellResendIntervalFrames, 0, 96);
+        config.unstickBackoffMaxFrames = std::clamp(config.unstickBackoffMaxFrames, 0, 480);
+        config.pvzAllinBaseLings = std::clamp(config.pvzAllinBaseLings, 0, 30);
+        config.pvzAllinSeenLings = std::clamp(config.pvzAllinSeenLings, 0, 40);
+        config.pvzPoolFirstCannons = std::clamp(config.pvzPoolFirstCannons, 2, 5);
+        config.pvzPoolFirstZealots = std::clamp(config.pvzPoolFirstZealots, 0, 6);
+        config.pvzAllinZealots = std::clamp(config.pvzAllinZealots, 0, 12);
+        config.pvzAllinProbeCap = config.pvzAllinProbeCap <= 0 ? 0 : std::clamp(config.pvzAllinProbeCap, 12, 40);
     }
 
     const Config &get()
@@ -212,6 +265,9 @@ namespace BnetConfig
            << " observer_min_dragoons=" << config.observerMinDragoons
            << " natural_cannons=" << config.naturalCannons
            << " main_cannons=" << config.mainCannons << (mainCannonsPresent ? "" : "(derived)")
+           << " mech_natural_cannons=" << config.mechNaturalCannons
+           << " expansion_cannons=" << config.expansionCannons
+           << " cannon_threat_priority=" << config.cannonThreatPriority
            << " bio_attack_start_scale=" << config.bioAttackStartScale
            << " bio_attack_continue_scale=" << config.bioAttackContinueScale
            << " bio_attack_resume_scale=" << config.bioAttackResumeScale
@@ -219,17 +275,55 @@ namespace BnetConfig
         if (config.bioLegacyKeyPresent) os << config.bioLegacyScale << "(start/resume only)";
         else os << "absent";
         os
+           << " pvt_mech_fix=" << config.pvtMechFix
+           << " mech_workers_per_army_unit=" << config.mechWorkersPerArmyUnit
+           << " mech_zealot_ratio=" << config.mechZealotRatio
+           << " mech_expand_army_per_base=" << config.mechExpandArmyPerBase
+           << " mech_luxury_upgrade_min_army=" << config.mechLuxuryUpgradeMinArmy
+           << " mech_attack_start_scale=" << config.mechAttackStartScale
+           << " mech_attack_continue_scale=" << config.mechAttackContinueScale
+           << " mech_attack_resume_scale=" << config.mechAttackResumeScale
+           << " combat_move_guard=" << config.combatMoveGuard
+           << " move_resend_tolerance_px=" << config.moveResendTolerancePx
+           << " combat_move_interval_frames=" << config.combatMoveIntervalFrames
+           << " observer_move_interval_frames=" << config.observerMoveIntervalFrames
+           << " move_guard_min_remaining_px=" << config.moveGuardMinRemainingPx
+           << " grid_waypoint_hold=" << config.gridWaypointHold
+           << " grid_waypoint_refresh_px=" << config.gridWaypointRefreshPx
+           << " spell_resend_interval_frames=" << config.spellResendIntervalFrames
+           << " unstick_backoff_max_frames=" << config.unstickBackoffMaxFrames
+           << " forced_pvz_opening=" << (config.forcedPvzOpening.empty() ? "UCB1" : config.forcedPvzOpening)
+           << " pvz_antiallin_fix=" << config.pvzAntiAllinFix
+           << " pvz_allin_base_lings=" << config.pvzAllinBaseLings
+           << " pvz_allin_seen_lings=" << config.pvzAllinSeenLings
+           << " pvz_pool_first_cannons=" << config.pvzPoolFirstCannons
+           << " pvz_pool_first_zealots=" << config.pvzPoolFirstZealots
+           << " pvz_allin_zealots=" << config.pvzAllinZealots
+           << " pvz_allin_probe_cap=" << config.pvzAllinProbeCap
+           << " print_build_info=" << config.printBuildInfo
            << " bnet_log=" << config.bnetLog;
         return os.str();
+    }
+
+    void noteLatency()
+    {
+        int latency = BWAPI::BroodwarPtr ? BWAPI::Broodwar->getLatencyFrames() : 0;
+        if (latency > maxLatency) maxLatency = latency;
+    }
+
+    int maxLatencyFrames()
+    {
+        return maxLatency;
     }
 
     int commandIntervalFrames()
     {
         if (config.minCommandIntervalFrames >= 0) return config.minCommandIntervalFrames;
 
-        // Auto: only active in high-latency environments (Battle.net is typically 5-6 frames)
-        int latency = BWAPI::BroodwarPtr ? BWAPI::Broodwar->getLatencyFrames() : 0;
-        if (latency > 4) return latency + 2;
-        return 0;
+        // Auto: only active in high-latency environments (Battle.net is typically 5-6 frames).
+        // Uses the highest latency seen this game: Remastered reported 5 at start and 3 later, which used to turn the
+        // guard off mid-game.
+        noteLatency();
+        return BnetPolicy::autoCommandInterval(maxLatency);
     }
 }

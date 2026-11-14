@@ -63,6 +63,16 @@ public:
 private:
     int enemyStrategyChanged;
 
+    // Battle.net (pvz_antiallin_fix): frame the extra all-in rules first confirmed an all-in, -1 = not latched
+    int bnetAllInLatchFrame = -1;
+
+    // Last logged PvZ defense state (pool first / all-in measures), for the [EVENT] pvz_defense line
+    std::string bnetDefenseState;
+
+    bool bnetZerglingAllIn();
+
+    void bnetLogDefenseState(int wallCannons, int minZealots, int probeCap);
+
     ZergStrategy recognizeEnemyStrategy();
 
     OurStrategy chooseOurStrategy(ZergStrategy newEnemyStrategy, std::vector<std::shared_ptr<Play>> &plays);

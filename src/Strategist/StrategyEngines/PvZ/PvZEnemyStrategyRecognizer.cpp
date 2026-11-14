@@ -5,6 +5,11 @@
 #include "Strategist.h"
 #include "UnitUtil.h"
 #include "General.h"
+#include "BnetConfig.h"
+#include "BnetLog.h"
+#include "BnetPolicy.h"
+
+#include <sstream>
 
 std::map<PvZ::ZergStrategy, std::string> PvZ::ZergStrategyNames = {
         {ZergStrategy::Unknown,            "Unknown"},
@@ -250,6 +255,50 @@ namespace
     }
 }
 
+bool PvZ::bnetZerglingAllIn()
+{
+    auto &bnetConfig = BnetConfig::get();
+    if (!bnetConfig.pvzAntiAllinFix) return false;
+
+    if (BnetPolicy::pvzAllInLatchActive(bnetAllInLatchFrame, currentFrame)) return true;
+    if (currentFrame >= BnetPolicy::PvzAllInBaseLingsUntilFrame) return false;
+
+    auto countLingsAt = [](Base *base)
+    {
+        if (!base) return 0;
+        int count = 0;
+        for (const auto &unit : Units::enemyAtBase(base))
+        {
+            if (unit->type == BWAPI::UnitTypes::Zerg_Zergling) count++;
+        }
+        return count;
+    };
+    int lingsAtOurBases = countLingsAt(Map::getMyMain());
+    if (Map::getMyNatural() != Map::getMyMain()) lingsAtOurBases += countLingsAt(Map::getMyNatural());
+    int lingsAlive = Units::countEnemy(BWAPI::UnitTypes::Zerg_Zergling);
+
+    bool openingKnown = enemyStrategy == ZergStrategy::PoolBeforeHatchery ||
+                        enemyStrategy == ZergStrategy::HatcheryBeforePool ||
+                        enemyStrategy == ZergStrategy::ZerglingAllIn;
+    if (!BnetPolicy::pvzAllInByLings(true,
+                                     openingKnown,
+                                     currentFrame,
+                                     lingsAtOurBases,
+                                     lingsAlive,
+                                     bnetConfig.pvzAllinBaseLings,
+                                     bnetConfig.pvzAllinSeenLings))
+    {
+        return false;
+    }
+
+    bnetAllInLatchFrame = currentFrame;
+    std::ostringstream os;
+    os << "pvz_allin_detect lings_at_bases=" << lingsAtOurBases << " lings_alive=" << lingsAlive
+       << " from=" << ZergStrategyNames[enemyStrategy];
+    BnetLog::event(os.str());
+    return true;
+}
+
 PvZ::ZergStrategy PvZ::recognizeEnemyStrategy()
 {
     auto strategy = enemyStrategy;
@@ -313,7 +362,7 @@ PvZ::ZergStrategy PvZ::recognizeEnemyStrategy()
                 // We might detect a rush late on large maps or if scouting is denied
                 if (isZerglingRush()) return ZergStrategy::ZerglingRush;
 
-                if (isZerglingAllIn()) return ZergStrategy::ZerglingAllIn;
+                if (isZerglingAllIn() || bnetZerglingAllIn()) return ZergStrategy::ZerglingAllIn;
 
                 if (isHydraBust()) return ZergStrategy::HydraBust;
 
@@ -333,7 +382,7 @@ PvZ::ZergStrategy PvZ::recognizeEnemyStrategy()
             case ZergStrategy::HatcheryBeforePool:
                 if (isWorkerRush()) return ZergStrategy::WorkerRush;
                 if (isSunkenContain()) return ZergStrategy::SunkenContain;
-                if (isZerglingAllIn()) return ZergStrategy::ZerglingAllIn;
+                if (isZerglingAllIn() || bnetZerglingAllIn()) return ZergStrategy::ZerglingAllIn;
                 if (isHydraBust()) return ZergStrategy::HydraBust;
 
                 if (isTurtle())
@@ -352,7 +401,7 @@ PvZ::ZergStrategy PvZ::recognizeEnemyStrategy()
             case ZergStrategy::ZerglingAllIn:
                 if (isSunkenContain()) return ZergStrategy::SunkenContain;
 
-                if (!isZerglingAllIn())
+                if (!isZerglingAllIn() && !bnetZerglingAllIn())
                 {
                     strategy = ZergStrategy::PoolBeforeHatchery;
                     continue;
@@ -366,7 +415,7 @@ PvZ::ZergStrategy PvZ::recognizeEnemyStrategy()
 
                 break;
             case ZergStrategy::HydraBust:
-                if (isZerglingAllIn()) return ZergStrategy::ZerglingAllIn;
+                if (isZerglingAllIn() || bnetZerglingAllIn()) return ZergStrategy::ZerglingAllIn;
 
                 if (!isHydraBust())
                 {

@@ -50,6 +50,34 @@ IF (VS_HUMAN)
     target_compile_definitions(Stardust PUBLIC VS_HUMAN=true)
 ENDIF (VS_HUMAN)
 
+# Build identifier shown in-game at start and in the [START] log line: <branch>@<short hash>[-dirty].
+# Computed at configure time (scripts/build-bnet.ps1 reconfigures on every run). Override with -DSTARDUST_BUILD_ID=...
+set(STARDUST_BUILD_ID "" CACHE STRING "Build identifier (empty = git branch@hash)")
+set(_stardust_build_id "${STARDUST_BUILD_ID}")
+IF (_stardust_build_id STREQUAL "")
+    set(_stardust_build_id "unknown")
+    find_package(Git QUIET)
+    IF (GIT_FOUND)
+        execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short=8 HEAD
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} OUTPUT_VARIABLE _sd_hash OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET RESULT_VARIABLE _sd_rc)
+        IF (_sd_rc EQUAL 0 AND NOT _sd_hash STREQUAL "")
+            execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --abbrev-ref HEAD
+                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} OUTPUT_VARIABLE _sd_branch OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+            execute_process(COMMAND ${GIT_EXECUTABLE} status --porcelain --untracked-files=no
+                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} OUTPUT_VARIABLE _sd_dirty OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+            set(_stardust_build_id "${_sd_branch}@${_sd_hash}")
+            IF (NOT _sd_dirty STREQUAL "")
+                set(_stardust_build_id "${_stardust_build_id}-dirty")
+            ENDIF ()
+        ENDIF ()
+    ENDIF ()
+ENDIF ()
+string(REGEX REPLACE "[^A-Za-z0-9_.@/+-]" "_" _stardust_build_id "${_stardust_build_id}")
+message(STATUS "Stardust build id: ${_stardust_build_id}")
+set_source_files_properties(${PROJECT_SOURCE_DIR}/Util/BnetLog.cpp PROPERTIES
+        COMPILE_DEFINITIONS "STARDUST_BUILD_ID=\"${_stardust_build_id}\"")
+
 # Battle.net summary log is independent of LOGGING_ENABLED, so it also works in TOURNAMENT_BUILD
 IF (BNET_LOG)
     target_compile_definitions(Stardust PUBLIC BNET_LOG_ENABLED=1)

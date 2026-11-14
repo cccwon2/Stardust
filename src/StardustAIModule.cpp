@@ -90,6 +90,7 @@ void StardustAIModule::onStart()
 
     // Battle.net summary log: start line (map, latency, active JSON options); must be before strategy initialization
     BnetLog::gameStart();
+    BnetLog::printBuildInfo();
 
     Log::SetDebug(true);
     CherryVis::initialize();
@@ -192,7 +193,9 @@ void StardustAIModule::onFrame()
     }
 #endif
 
+    BnetConfig::noteLatency();
     BnetLog::onFrame();
+    BnetLog::drawBuildInfo();
 
     Timer::start("Frame");
     PerformanceManager::frameStart();

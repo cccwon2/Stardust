@@ -33,6 +33,19 @@ namespace
         if (typeid(*current) == typeid(T)) return;
         current->status.transitionTo = std::make_shared<T>(std::forward<Args>(args)...);
     }
+
+    // pvt_mech_fix: active while pluto_pvt_snipe is on and the enemy is recognized as MidGameMech
+    bool bnetMechFixActive(PvT::TerranStrategy enemyStrategy)
+    {
+        auto &bnetConfig = BnetConfig::get();
+        return bnetConfig.plutoPvtSnipe && bnetConfig.pvtMechFix && enemyStrategy == PvT::TerranStrategy::MidGameMech;
+    }
+
+    // Completed main-army combat units (zealots + dragoons), used by the mech army gates
+    int bnetArmyUnitCount()
+    {
+        return Units::countCompleted(BWAPI::UnitTypes::Protoss_Zealot) + Units::countCompleted(BWAPI::UnitTypes::Protoss_Dragoon);
+    }
 }
 
 void PvT::initialize(std::vector<std::shared_ptr<Play>> &plays, bool transitioningFromRandom, const std::string &openingOverride)
@@ -284,7 +297,10 @@ void PvT::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
     auto midAndLateGameMainArmyProduction = [&]()
     {
         // Baseline production is one combat unit for every 6 workers (approximately 3 units per mining base)
-        int higherPriorityCount = (Workers::mineralWorkers() / 6) - inProgressCount;
+        // pvt_mech_fix: against mech use mech_workers_per_army_unit (default 4), since the bot kept out-expanding its army
+        bool mechFix = bnetMechFixActive(enemyStrategy);
+        int workersPerArmyUnit = mechFix ? BnetConfig::get().mechWorkersPerArmyUnit : 6;
+        int higherPriorityCount = BnetPolicy::armyBaselineUnits(Workers::mineralWorkers(), workersPerArmyUnit) - inProgressCount;
 
         // Counter tanks with speedlots once the enemy has at least four
         int enemyTanks = Units::countEnemy(BWAPI::UnitTypes::Terran_Siege_Tank_Siege_Mode) +
@@ -296,6 +312,12 @@ void PvT::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
             if (Units::countEnemy(BWAPI::UnitTypes::Terran_Vulture) > enemyTanks)
             {
                 desiredZealots = std::min(dragoonCount, enemyTanks * 2);
+            }
+
+            // pvt_mech_fix: keep the army dragoon-heavy against tanks, vultures and mines (default 0.5 zealot per dragoon)
+            if (mechFix)
+            {
+                desiredZealots = BnetPolicy::mechZealotTarget(dragoonCount, enemyTanks, BnetConfig::get().mechZealotRatio);
             }
 
             if (desiredZealots > zealotCount)
@@ -687,18 +709,26 @@ void PvT::handleUpgrades(std::map<int, std::vector<ProductionGoal>> &prioritized
     // Basic infantry skill upgrades are queued when we have enough of them and are still building them
     upgradeAtCount(prioritizedProductionGoals, BWAPI::UpgradeTypes::Leg_Enhancements, BWAPI::UnitTypes::Protoss_Zealot, 6);
 
+    // pvt_mech_fix: against mech, defer observer speed / sight and shuttle speed (which also builds a robotics support bay)
+    // until the army reaches mech_luxury_upgrade_min_army, so gas goes into dragoons first
+    bool luxuryUpgrades = !bnetMechFixActive(enemyStrategy) ||
+                          BnetPolicy::mechLuxuryUpgradeAllowed(bnetArmyUnitCount(), BnetConfig::get().mechLuxuryUpgradeMinArmy);
+
     // Cases where we want the upgrade as soon as we start building one of the units
-    upgradeWhenUnitCreated(prioritizedProductionGoals,
-                           BWAPI::UpgradeTypes::Gravitic_Boosters,
-                           BWAPI::UnitTypes::Protoss_Observer,
-                           false,
-                           false,
-                           PRIORITY_HIGHPRIORITYUPGRADES);
-    upgradeWhenUnitCreated(prioritizedProductionGoals,
-                           BWAPI::UpgradeTypes::Gravitic_Drive,
-                           BWAPI::UnitTypes::Protoss_Shuttle,
-                           false,
-                           Units::countCompleted(BWAPI::UnitTypes::Protoss_Assimilator) < 3);
+    if (luxuryUpgrades)
+    {
+        upgradeWhenUnitCreated(prioritizedProductionGoals,
+                               BWAPI::UpgradeTypes::Gravitic_Boosters,
+                               BWAPI::UnitTypes::Protoss_Observer,
+                               false,
+                               false,
+                               PRIORITY_HIGHPRIORITYUPGRADES);
+        upgradeWhenUnitCreated(prioritizedProductionGoals,
+                               BWAPI::UpgradeTypes::Gravitic_Drive,
+                               BWAPI::UnitTypes::Protoss_Shuttle,
+                               false,
+                               Units::countCompleted(BWAPI::UnitTypes::Protoss_Assimilator) < 3);
+    }
     upgradeWhenUnitCreated(prioritizedProductionGoals,
                            BWAPI::UpgradeTypes::Carrier_Capacity,
                            BWAPI::UnitTypes::Protoss_Carrier,
@@ -719,7 +749,7 @@ void PvT::handleUpgrades(std::map<int, std::vector<ProductionGoal>> &prioritized
                            PRIORITY_HIGHPRIORITYUPGRADES);
 
     // Get observer sight range on three gases
-    if (Units::countCompleted(BWAPI::UnitTypes::Protoss_Assimilator) >= 3)
+    if (luxuryUpgrades && Units::countCompleted(BWAPI::UnitTypes::Protoss_Assimilator) >= 3)
     {
         upgradeWhenUnitCreated(prioritizedProductionGoals,
                                BWAPI::UpgradeTypes::Sensor_Array,
@@ -856,10 +886,14 @@ void PvT::handleDetection(std::vector<std::shared_ptr<Play>> &plays, std::map<in
 void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &prioritizedProductionGoals)
 {
     // Pluto snipe: conditional cannon placement requests in mineral lines against vulture / drop harass.
-    // - Natural: natural_cannons once our natural nexus is complete (skipped for ForgeExpandGoons, handled by the FFE play).
-    // - Main: main_cannons against TwoFactory / mech / 3+ vultures, independent of the natural, not while holding a marine rush.
-    // Requests are at PRIORITY_NORMAL, below dragoon base production. Only the predefined workerDefenseCannons locations are
-    // used, so the target count is not guaranteed (no choke cannon helper exists in Stardust).
+    // - Natural: natural_cannons once our natural nexus is complete (skipped for ForgeExpandGoons, handled by the FFE play),
+    //   raised to mech_natural_cannons under a mech / vulture threat.
+    // - Main: main_cannons against TwoFactory / mech / 3+ vultures / spider mines, not while holding a marine rush.
+    // - Other bases: expansion_cannons under the same threat, once each nexus is complete.
+    // Requests are at PRIORITY_NORMAL, below dragoon base production, except the first cannon (and its pylon) of a base
+    // under a threat with cannon_threat_priority, which goes to PRIORITY_BASEDEFENSE (the forge follows as a prerequisite).
+    // Only the predefined workerDefenseCannons locations are used, so the target count is not guaranteed (no choke cannon
+    // helper exists in Stardust).
     auto &bnetConfig = BnetConfig::get();
     if (!bnetConfig.plutoPvtSnipe) return;
 
@@ -870,11 +904,21 @@ void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &
         if (plutoCannonIssuesLogged.insert(key.str()).second)
         {
             Log::Get() << "Pluto cannons @ " << base->getTilePosition() << ": " << reason;
-            BnetLog::event(std::string("cannon_issue base=") + (base == Map::getMyMain() ? "main" : "natural") + " reason=\"" + reason + "\"");
+            BnetLog::event(std::string("cannon_issue base=")
+                           + (base == Map::getMyMain() ? "main" : (base == Map::getMyNatural() ? "natural" : "expansion"))
+                           + " tile=" + std::to_string(base->getTilePosition().x) + "," + std::to_string(base->getTilePosition().y)
+                           + " reason=\"" + reason + "\"");
         }
     };
 
-    auto requestCannonsAtBase = [&](Base *base, int target)
+    // Mech / vulture threat: drives the main, raised natural and expansion cannon targets and the urgent first cannon
+    bool mechThreat = enemyStrategy == TerranStrategy::TwoFactory ||
+                      enemyStrategy == TerranStrategy::MidGameMech ||
+                      enemyStrategy == TerranStrategy::MidGameBioMech ||
+                      Units::countEnemy(BWAPI::UnitTypes::Terran_Vulture) > 2 ||
+                      Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Vulture_Spider_Mine);
+
+    auto requestCannonsAtBase = [&](Base *base, int target, const char *kind)
     {
         if (!base || target <= 0) return;
         if (!base->resourceDepot || !base->resourceDepot->completed) return;
@@ -886,13 +930,13 @@ void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &
             return;
         }
 
-        auto buildAtTile = [&](BWAPI::TilePosition tile, BWAPI::UnitType type, int framesUntilPowered)
+        auto buildAtTile = [&](BWAPI::TilePosition tile, BWAPI::UnitType type, int framesUntilPowered, bool urgent)
         {
             auto buildLocation = BuildingPlacement::BuildLocation(Block::Location(tile),
                                                                   BuildingPlacement::builderFrames(base->getPosition(), tile, type),
                                                                   framesUntilPowered,
                                                                   0);
-            prioritizedProductionGoals[PRIORITY_NORMAL].emplace_back(std::in_place_type<UnitProductionGoal>,
+            prioritizedProductionGoals[urgent ? PRIORITY_BASEDEFENSE : PRIORITY_NORMAL].emplace_back(std::in_place_type<UnitProductionGoal>,
                                                                      "SE-pluto-cannon",
                                                                      type,
                                                                      buildLocation);
@@ -909,7 +953,10 @@ void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &
         {
             if (!Builder::isPendingHere(locations.powerPylon))
             {
-                buildAtTile(locations.powerPylon, BWAPI::UnitTypes::Protoss_Pylon, 0);
+                buildAtTile(locations.powerPylon,
+                            BWAPI::UnitTypes::Protoss_Pylon,
+                            0,
+                            BnetPolicy::cannonRequestUrgent(bnetConfig.cannonThreatPriority, mechThreat, 0, 0));
             }
             return;
         }
@@ -940,24 +987,65 @@ void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &
         int framesUntilPowered = pylon->completed ? 0 : std::max(0, pylon->estimatedCompletionFrame - currentFrame);
         for (int i = 0; i < plan.requestCount; i++)
         {
-            buildAtTile(locations.workerDefenseCannons[plan.requestIndices[i]], BWAPI::UnitTypes::Protoss_Photon_Cannon, framesUntilPowered);
+            bool urgent = BnetPolicy::cannonRequestUrgent(bnetConfig.cannonThreatPriority, mechThreat, plan.existing, i);
+            buildAtTile(locations.workerDefenseCannons[plan.requestIndices[i]],
+                        BWAPI::UnitTypes::Protoss_Photon_Cannon,
+                        framesUntilPowered,
+                        urgent);
+        }
+
+        // One [EVENT] line per base and target count, so the log shows when each base got its cannons requested
+        if (plan.requestCount > 0)
+        {
+            std::ostringstream key;
+            key << base->getTilePosition() << ":plan:" << target;
+            if (plutoCannonIssuesLogged.insert(key.str()).second)
+            {
+                std::ostringstream ev;
+                ev << "cannon_plan base=" << kind << " tile=" << base->getTilePosition().x << "," << base->getTilePosition().y
+                   << " target=" << target << " existing=" << plan.existing << " requested=" << plan.requestCount
+                   << " urgent=" << BnetPolicy::cannonRequestUrgent(bnetConfig.cannonThreatPriority, mechThreat, plan.existing, 0)
+                   << " mech_threat=" << mechThreat;
+                BnetLog::event(ev.str());
+            }
         }
     };
 
-    // Natural mineral line
+    using Kind = BnetPolicy::CannonBaseKind;
+    auto cannonTargetFor = [&](Kind kind)
+    {
+        return BnetPolicy::cannonTarget(kind,
+                                        mechThreat,
+                                        bnetConfig.naturalCannons,
+                                        bnetConfig.mechNaturalCannons,
+                                        bnetConfig.mainCannons,
+                                        bnetConfig.expansionCannons);
+    };
+
+    // Natural mineral line (raised to mech_natural_cannons under a mech / vulture threat)
     auto natural = Map::getMyNatural();
     if (ourStrategy != OurStrategy::ForgeExpandGoons && natural && natural->owner == BWAPI::Broodwar->self())
     {
-        requestCannonsAtBase(natural, bnetConfig.naturalCannons);
+        requestCannonsAtBase(natural, cannonTargetFor(Kind::Natural), "natural");
     }
 
     // Main mineral line, independent of the natural
-    bool mechThreat = enemyStrategy == TerranStrategy::TwoFactory ||
-                      enemyStrategy == TerranStrategy::MidGameMech ||
-                      enemyStrategy == TerranStrategy::MidGameBioMech ||
-                      Units::countEnemy(BWAPI::UnitTypes::Terran_Vulture) > 2;
-    if (bnetConfig.mainCannons > 0 && mechThreat && ourStrategy != OurStrategy::AntiMarineRush)
+    auto mainBase = Map::getMyMain();
+    if (ourStrategy != OurStrategy::AntiMarineRush)
     {
-        requestCannonsAtBase(Map::getMyMain(), bnetConfig.mainCannons);
+        requestCannonsAtBase(mainBase, cannonTargetFor(Kind::Main), "main");
+    }
+
+    // Every other owned base (third and later): expansion_cannons under a mech / vulture threat.
+    // In the 2026-11-15 Fighting Spirit replay the third base went 13 minutes without a cannon vs. 108 vultures.
+    int expansionTarget = cannonTargetFor(Kind::Expansion);
+    if (expansionTarget > 0)
+    {
+        for (auto base : Map::getMyBases())
+        {
+            if (!base || base == mainBase || base == natural) continue;
+            if (base->owner != BWAPI::Broodwar->self()) continue;
+            requestCannonsAtBase(base, expansionTarget, "expansion");
+        }
     }
 }

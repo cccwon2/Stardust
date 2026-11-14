@@ -12,6 +12,18 @@ namespace BnetLog
     // Call at the end of onStart (after BnetConfig and Opponent are initialized)
     void gameStart();
 
+    // Build identifier compiled into the DLL (<branch>@<short hash>[-dirty], from CMake STARDUST_BUILD_ID)
+    const char *buildId();
+
+    // Local-only in-game message (Broodwar->printf, not sent to other players) with the build id and config source.
+    // Controlled by print_build_info; independent of BNET_LOG_ENABLED / bnet_log. Call after BnetConfig::initialize.
+    void printBuildInfo();
+
+    // Same two lines drawn with Broodwar->drawTextScreen (debug overlay) for the first 30 game seconds.
+    // On Battle.net the Remastered bridge does not display native printf text (it writes it to its log instead),
+    // but it may show debug drawing through its overlay window. Call once per frame.
+    void drawBuildInfo();
+
     // Call once per frame; writes a periodic [APM] line every 2 game minutes (2880 frames)
     void onFrame();
 
@@ -44,4 +56,27 @@ namespace BnetLog
 
     // MidGameBio attack-state decisions in AttackBaseSquad (counted only when the bio scales are active)
     void bioDecision(bool wasAttacking, bool nowAttacking);
+
+    // MidGameMech attack-state decisions in AttackBaseSquad (counted only when the mech scales are active)
+    void mechDecision(bool wasAttacking, bool nowAttacking);
+
+    // Our own command counter. BWAPI's getAPM() returns 0 on Remastered, so every frame MyUnitImpl::update counts the
+    // units that were issued an order on the previous frame (one order per unit per frame, as enforced by MyUnit).
+    enum class OrderCategory { Worker, Observer, Army };
+    void countIssuedOrder(OrderCategory category);
+
+    // Non-worker moves skipped by the repeated move guard (combat_move_guard)
+    void moveSkipped();
+
+    // Grid waypoint re-targets avoided by grid_waypoint_hold
+    void gridHold();
+
+    // Unstick stops of repeatedly stuck workers sent with a backoff longer than upstream (unstick_backoff_max_frames)
+    void unstickBackoff();
+
+    // Stasis / unload orders not re-sent because the same order is still in flight (spell_resend_interval_frames)
+    void repeatedOrderSkipped();
+
+    // PvT mech expansion gate state change (logged as an [EVENT] line only when the state changes)
+    void mechExpandGate(bool blocked, int bases, int armyUnits, int required);
 }

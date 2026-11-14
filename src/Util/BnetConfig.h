@@ -26,6 +26,9 @@ namespace BnetConfig
         int naturalCannons = 1;                 // Conditional cannon requests in the natural mineral line once it is taken (0-2)
         int mainCannons = 1;                    // Conditional cannon requests in the main mineral line vs. vultures / mech (0-1);
                                                 // absent key -> 1 if natural_cannons > 0 else 0
+        int mechNaturalCannons = 2;             // Natural target raised to this under a mech / vulture threat (0-2)
+        int expansionCannons = 1;               // Cannons in the mineral line of every other owned base under a mech / vulture threat (0-2)
+        bool cannonThreatPriority = true;       // First cannon (and its pylon) of each base above army production under a threat
         // Aggression multipliers vs. a recognized MidGameBio Terran (AttackBaseSquad), per decision state.
         // Effective values after the compatibility policy in BnetPolicy::resolveBioScales.
         double bioAttackStartScale = 0.7;       // shouldStartAttack (moving -> attacking)
@@ -34,7 +37,40 @@ namespace BnetConfig
         bool bioLegacyKeyPresent = false;       // bio_aggression_scale was present in the file (applies to start / resume only)
         double bioLegacyScale = 0.7;
 
+        // PvT vs. MidGameMech (only with pluto_pvt_snipe on, enemy Terran recognized as MidGameMech)
+        bool pvtMechFix = true;                 // Master switch for the mech changes below
+        int mechWorkersPerArmyUnit = 4;         // Baseline army: one unit per N mineral workers (upstream 6)
+        double mechZealotRatio = 0.5;           // Max zealots per dragoon vs. tanks (upstream 1.5, or 1.0 with many vultures)
+        int mechExpandArmyPerBase = 6;          // 4th+ base needs army >= N * owned bases; also no contained-enemy boost. 0 = off
+        int mechLuxuryUpgradeMinArmy = 20;      // Defer observer speed/sight and shuttle speed until army >= N. 0 = off
+        double mechAttackStartScale = 0.7;      // AttackBaseSquad aggression multipliers vs. MidGameMech
+        double mechAttackContinueScale = 1.0;
+        double mechAttackResumeScale = 0.7;
+
+        // Repeated move guard for non-worker units (observers, army)
+        bool combatMoveGuard = true;            // Skip re-sending a move to (nearly) the same target within the command interval
+        int moveResendTolerancePx = 64;         // Targets within this distance of the last move target count as the same
+        int combatMoveIntervalFrames = 12;      // Minimum frames between such moves (at least the latency command interval)
+        int observerMoveIntervalFrames = 24;    // Same for observers following the army
+        int moveGuardMinRemainingPx = 48;       // Never skip once the unit is this close to its last move target
+        bool gridWaypointHold = true;           // Keep the current grid waypoint until close to it (no per-tile re-targeting)
+        int gridWaypointRefreshPx = 64;         // Distance to the waypoint at which the next grid waypoint is sent
+        int spellResendIntervalFrames = 24;     // Minimum frames between identical stasis / unload orders. 0 = off
+        int unstickBackoffMaxFrames = 192;      // Backoff cap for repeatedly stuck workers (stop / move loop). 0 = off
+
+        // PvZ vs. zergling all-ins (pool first -> mass speedlings)
+        std::string forcedPvzOpening = "FFEDragoons";   // PvZ opening used instead of UCB1: FFEDragoons, SairSpeedlot,
+                                                        // EarlyGameDefense (empty = use UCB1)
+        bool pvzAntiAllinFix = true;            // Master switch for the PvZ changes below
+        int pvzAllinBaseLings = 6;              // Zerglings at our main / natural that confirm an all-in (before frame 9000). 0 = off
+        int pvzAllinSeenLings = 12;             // Living zerglings seen that confirm an all-in (before frame 8000). 0 = off
+        int pvzPoolFirstCannons = 3;            // FFE wall cannons once a pool-first opening is recognized (2-5)
+        int pvzPoolFirstZealots = 2;            // FFEDragoons: zealots before dragoons vs. pool first (0-6)
+        int pvzAllinZealots = 4;                // FFEDragoons: minimum zealots vs. an all-in, above probe production (0-12)
+        int pvzAllinProbeCap = 18;              // FFE: probes above this move below zealots during an all-in. 0 = off
+
         // Phase 3: Lightweight log
+        bool printBuildInfo = true;             // Local-only in-game message at game start: build id and config source
         bool bnetLog = true;                    // Write one-line summaries to bwapi-data/write/stardust_bnet.log
     };
 
@@ -55,4 +91,8 @@ namespace BnetConfig
     // Effective minimum interval in frames between repeated identical commands to the same unit.
     // Returns 0 when the guard is inactive.
     int commandIntervalFrames();
+
+    // Highest latency observed this game (updated by commandIntervalFrames / noteLatency)
+    int maxLatencyFrames();
+    void noteLatency();
 }
