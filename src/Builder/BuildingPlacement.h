@@ -112,6 +112,10 @@ namespace BuildingPlacement
     // reports that case as 0, and the builder then never receives a worker.
     bool workerCanReach(BWAPI::TilePosition tile, BWAPI::UnitType type);
 
+    // A 2x2 next to our main nexus that workerCanReach accepts.
+    // Used when every registered pylon tile fails that check. Invalid when none is found.
+    BWAPI::TilePosition reachablePylonNearMain();
+
     void setUseStartBlocksForAllStartingLocations(bool value);
 
     std::shared_ptr<Block> startBlockForBase(Base *base);

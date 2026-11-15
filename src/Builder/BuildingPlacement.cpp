@@ -1,5 +1,7 @@
 #include "BuildingPlacement.h"
 
+#include <algorithm>
+
 #include "Map.h"
 #include "Builder.h"
 #include "PathFinding.h"
@@ -1442,6 +1444,83 @@ namespace BuildingPlacement
 
         // No probe position to test yet. Keep the caller's current choice.
         return checked == 0;
+    }
+
+    BWAPI::TilePosition reachablePylonNearMain()
+    {
+        auto main = Map::getMyMain();
+        if (!main) return BWAPI::TilePositions::Invalid;
+        auto nexus = main->getTilePosition();
+        if (!nexus.isValid()) return BWAPI::TilePositions::Invalid;
+
+        auto touchesResources = [&](int x, int y)
+        {
+            BWAPI::TilePosition tile(x, y);
+            for (int dx = 0; dx < 2; dx++)
+            {
+                for (int dy = 0; dy < 2; dy++)
+                {
+                    if (main->isInMineralLine(BWAPI::TilePosition(x + dx, y + dy))) return true;
+                }
+            }
+            for (const auto &geyser : main->geysersOrRefineries())
+            {
+                if (!geyser || !geyser->tile.isValid()) continue;
+                // Geyser is 4x2. Keep one tile of space so the pylon does not sit on the gas workers.
+                auto padded = geyser->tile + BWAPI::TilePosition(-1, -1);
+                if (Geo::Overlaps(tile, 2, 2, padded, 6, 4)) return true;
+            }
+            return false;
+        };
+
+        auto fits = [&](int x, int y, bool avoidResources)
+        {
+            if (x < 0 || y < 0) return false;
+            if (x + 1 >= BWAPI::Broodwar->mapWidth() || y + 1 >= BWAPI::Broodwar->mapHeight()) return false;
+            if (avoidResources && touchesResources(x, y)) return false;
+
+            BWAPI::TilePosition tile(x, y);
+            for (int dx = 0; dx < 2; dx++)
+            {
+                for (int dy = 0; dy < 2; dy++)
+                {
+                    BWAPI::TilePosition part(x + dx, y + dy);
+                    if (!BWAPI::Broodwar->isBuildable(part) || !Map::isWalkable(part)) return false;
+                }
+            }
+            return workerCanReach(tile, BWAPI::UnitTypes::Protoss_Pylon);
+        };
+
+        // Closest 2x2 first, off the mineral line and the geyser. A second pass allows
+        // those tiles when the main has no other buildable spot. The radius stays in
+        // the main: a start-block pylon is a couple of tiles from the nexus.
+        const int radius = 12;
+        for (bool avoidResources : {true, false})
+        {
+            for (int r = 1; r <= radius; r++)
+            {
+                int x0 = nexus.x - r;
+                int y0 = nexus.y - r;
+                int x1 = nexus.x + 3 + r;
+                int y1 = nexus.y + 2 + r;
+                for (int y = y0; y <= y1; y++)
+                {
+                    for (int x = x0; x <= x1; x++)
+                    {
+                        int gapX = 0;
+                        if (x + 1 < nexus.x) gapX = nexus.x - (x + 1);
+                        else if (x > nexus.x + 3) gapX = x - (nexus.x + 3);
+                        int gapY = 0;
+                        if (y + 1 < nexus.y) gapY = nexus.y - (y + 1);
+                        else if (y > nexus.y + 2) gapY = y - (nexus.y + 2);
+                        if (std::max(gapX, gapY) != r) continue;
+                        if (fits(x, y, avoidResources)) return BWAPI::TilePosition(x, y);
+                    }
+                }
+            }
+        }
+
+        return BWAPI::TilePositions::Invalid;
     }
 
     void setUseStartBlocksForAllStartingLocations(bool value)
