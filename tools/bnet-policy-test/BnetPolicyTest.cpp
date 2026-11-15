@@ -517,6 +517,12 @@ namespace
         }
         CHECK(homeGuardValue(0, 600) == 0);
 
+        // Keep defenders when a visible fightable threat exists despite missing detection
+        CHECK(!defendBaseShouldReleaseForMissingDetection(true, false, true));
+        CHECK(defendBaseShouldReleaseForMissingDetection(true, false, false));
+        CHECK(!defendBaseShouldReleaseForMissingDetection(true, true, false));
+        CHECK(!defendBaseShouldReleaseForMissingDetection(false, false, false));
+
         CHECK(mineHoldActive(true, true, true, 0, 9000, 12000));
         CHECK(!mineHoldActive(true, true, true, 1, 9000, 12000));
         CHECK(!mineHoldActive(true, true, false, 0, 9000, 12000));

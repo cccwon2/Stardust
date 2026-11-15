@@ -626,6 +626,17 @@ namespace BnetPolicy
         return snipe && dragoons > 0 && frame < untilFrame && completedObservers == 0;
     }
 
+    // DefendBase::update: upstream releases every ground unit when the squad needs detection and has no
+    // observer. That left probes alone against a visible vulture while a remembered mine also flagged
+    // detection (KnockOut 1.4, bnet-pluto@908059a0). Keep defenders when a visible fightable threat is
+    // present; still release when detection is missing and only undetectable threats remain.
+    inline bool defendBaseShouldReleaseForMissingDetection(bool needsDetection, bool hasDetector,
+                                                           bool hasVisibleFightableThreat)
+    {
+        if (!needsDetection || hasDetector) return false;
+        return !hasVisibleFightableThreat;
+    }
+
     // DefendBase "enemy value" that makes DefendBase request about `dragoons` units: it requests zealot-value units until
     // ourValue >= enemyValue * 6 / 5, so a value just below dragoons * zealotValue * 5 / 6 asks for that many.
     inline int homeGuardValue(int dragoons, int zealotValue)

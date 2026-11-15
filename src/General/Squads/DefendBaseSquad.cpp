@@ -1,5 +1,7 @@
 #include "DefendBaseSquad.h"
 
+#include <BWAPI.h>
+
 void DefendBaseSquad::execute()
 {
     for (auto it = enemyUnits.begin(); it != enemyUnits.end();)
@@ -12,6 +14,26 @@ void DefendBaseSquad::execute()
         {
             it = enemyUnits.erase(it);
         }
+    }
+
+    // When a vulture is in the base, aim the squad at the mineral line so home-guard dragoons walk onto
+    // the harassment instead of idling at the nexus / choke (KnockOut 1.4 observation).
+    bool vultureInBase = false;
+    for (const auto &enemy : enemyUnits)
+    {
+        if (enemy && enemy->type == BWAPI::UnitTypes::Terran_Vulture)
+        {
+            vultureInBase = true;
+            break;
+        }
+    }
+    if (vultureInBase && base && base->mineralLineCenter.isValid())
+    {
+        targetPosition = base->mineralLineCenter;
+    }
+    else if (base)
+    {
+        targetPosition = base->getPosition();
     }
 
     Squad::execute();

@@ -1,5 +1,6 @@
 #include "DefendBase.h"
 #include "BnetConfig.h"
+#include "BnetPolicy.h"
 
 #include "Strategist.h"
 #include "General.h"
@@ -98,8 +99,23 @@ void DefendBase::update()
         status.unitRequirements.emplace_back(1, BWAPI::UnitTypes::Protoss_Observer, squad->getTargetPosition());
     }
 
-    // Release any units in the squad if they are no longer required
-    if (enemyValue == 0 || (squad->needsDetection() && detectors.empty()))
+    // Release ground units when nothing to defend, or when we need detection we do not have and there is
+    // no visible threat they can still fight (e.g. keep a dragoon on a mineral-line vulture while a
+    // remembered spider mine also requests an observer).
+    bool visibleFightableThreat = false;
+    for (const auto &enemy : squad->enemyUnits)
+    {
+        if (!enemy || !enemy->exists()) continue;
+        if (enemy->needsDetection()) continue;
+        if (enemy->type.isWorker()) continue;
+        if (!enemy->canAttackGround() && !enemy->canAttackAir()) continue;
+        visibleFightableThreat = true;
+        break;
+    }
+    if (enemyValue == 0 ||
+        BnetPolicy::defendBaseShouldReleaseForMissingDetection(squad->needsDetection(),
+                                                               !detectors.empty(),
+                                                               visibleFightableThreat))
     {
         status.removedUnits = squad->getUnits();
         return;
