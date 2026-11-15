@@ -671,7 +671,20 @@ namespace Producer
 
         bool choosePylonBuildLocation(const ProductionItem &pylon, bool tentative = false, int requiredWidth = 0)
         {
-            if (pylon.buildLocation.location.tile.isValid()) return true;
+            if (pylon.buildLocation.location.tile.isValid())
+            {
+                if (BuildingPlacement::workerCanReach(pylon.buildLocation.location.tile, BWAPI::UnitTypes::Protoss_Pylon))
+                    return true;
+
+                // A fixed tile no probe can walk to never produces a build or move.
+                // Drop it and take a main location instead. Planning calls leave the tile
+                // in place so a later commit can replace it.
+                if (tentative) return false;
+                Log::Get() << "Pylon @" << pylon.buildLocation.location.tile
+                           << " is not reachable; choosing a main pylon";
+                pylon.buildLocation = BuildingPlacement::BuildLocation(
+                        Block::Location(BWAPI::TilePositions::Invalid), 0, 0, 0);
+            }
 
             auto fixedNeighbourhood = std::get_if<BuildingPlacement::Neighbourhood>(&pylon.location);
             auto neighbourhood = fixedNeighbourhood ? *fixedNeighbourhood : BuildingPlacement::Neighbourhood::AllMyBases;
@@ -698,6 +711,9 @@ namespace Producer
                 {
                     continue;
                 }
+
+                if (!BuildingPlacement::workerCanReach(pylonLocation.location.tile, BWAPI::UnitTypes::Protoss_Pylon))
+                    continue;
 
                 int score = std::max(0, desiredMedium - (int) pylonLocation.powersMedium.size())
                             + std::max(0, desiredLarge - (int) pylonLocation.powersLarge.size());
@@ -1809,7 +1825,8 @@ namespace Producer
                     // An exception is if the pylon is being queued for a much later frame, in which case we don't want to interrupt our normal
                     // pylon placement decisions
                     if (*unitType == BWAPI::UnitTypes::Protoss_Pylon && !otherItem->buildLocation.location.tile.isValid()
-                        && (frame - otherItem->startFrame) < 2000)
+                        && (frame - otherItem->startFrame) < 2000
+                        && BuildingPlacement::workerCanReach(buildLocation->location.tile, BWAPI::UnitTypes::Protoss_Pylon))
                     {
                         otherItem->estimatedWorkerMovementTime = buildLocation->builderFrames;
                         otherItem->buildLocation = *buildLocation;

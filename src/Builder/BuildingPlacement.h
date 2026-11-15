@@ -107,6 +107,11 @@ namespace BuildingPlacement
 
     ForgeGatewayWall &getForgeGatewayWall();
 
+    // True when one of our probes has a ground path to the build tile.
+    // An unreachable tile must not be treated as the supply pylon: ExpectedTravelTime
+    // reports that case as 0, and the builder then never receives a worker.
+    bool workerCanReach(BWAPI::TilePosition tile, BWAPI::UnitType type);
+
     void setUseStartBlocksForAllStartingLocations(bool value);
 
     std::shared_ptr<Block> startBlockForBase(Base *base);

@@ -1277,11 +1277,16 @@ namespace BuildingPlacement
     // TODO: Update location origins depending on whether there are workers at a base
     int builderFrames(BWAPI::Position origin, BWAPI::TilePosition tile, BWAPI::UnitType type)
     {
-        return PathFinding::ExpectedTravelTime(
+        // defaultIfInaccessible is 0, which is the same value as "the worker is already there".
+        // Ask for -1 and turn that into a long walk so an unreachable tile sorts last.
+        int travel = PathFinding::ExpectedTravelTime(
                 origin,
                 BWAPI::Position(tile) + (BWAPI::Position(type.tileSize()) / 2),
                 BWAPI::Broodwar->self()->getRace().getWorker(),
-                PathFinding::PathFindingOptions::UseNearestBWEMArea);
+                PathFinding::PathFindingOptions::UseNearestBWEMArea,
+                -1);
+        if (travel < 0) return 2000;
+        return travel;
     }
 
     BaseStaticDefenseLocations &baseStaticDefenseLocations(Base *base)
@@ -1410,6 +1415,33 @@ namespace BuildingPlacement
     ForgeGatewayWall &getForgeGatewayWall()
     {
         return getOrCreateForgeGatewayWall();
+    }
+
+    bool workerCanReach(BWAPI::TilePosition tile, BWAPI::UnitType type)
+    {
+        if (!tile.isValid()) return false;
+
+        // Use BWAPI probes. Strategy init runs before Units::update, so the bot's
+        // own unit list is still empty on the frame the opening is chosen.
+        BWAPI::Position target = BWAPI::Position(tile) + BWAPI::Position(type.tileWidth() * 16, type.tileHeight() * 16);
+        int checked = 0;
+        for (auto probe : BWAPI::Broodwar->self()->getUnits())
+        {
+            if (!probe->exists() || !probe->isCompleted()) continue;
+            if (probe->getType() != BWAPI::UnitTypes::Protoss_Probe) continue;
+            if (!probe->getPosition().isValid()) continue;
+
+            checked++;
+            int dist = PathFinding::GetGroundDistance(
+                    probe->getPosition(),
+                    target,
+                    BWAPI::UnitTypes::Protoss_Probe,
+                    PathFinding::PathFindingOptions::UseNearestBWEMArea);
+            if (dist >= 0) return true;
+        }
+
+        // No probe position to test yet. Keep the caller's current choice.
+        return checked == 0;
     }
 
     void setUseStartBlocksForAllStartingLocations(bool value)
