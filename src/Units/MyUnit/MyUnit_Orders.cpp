@@ -51,6 +51,25 @@ namespace
         auto worker = dynamic_cast<const MyWorkerImpl *>(unit);
         return worker && worker->bnetSimpleGather;
     }
+
+    // resource_fail_backoff_frames: true while the worker is backing off after BWAPI rejected one of its resource commands
+    bool resourceBackoffBlocks(const MyUnitImpl *unit)
+    {
+        auto worker = dynamic_cast<const MyWorkerImpl *>(unit);
+        return worker && BnetPolicy::resourceBackoffActive(worker->bnetResourceFailFrame,
+                                                           currentFrame,
+                                                           BnetConfig::get().resourceFailBackoffFrames);
+    }
+
+    // Counts and logs a resource command rejected by BWAPI and starts the worker's backoff
+    void noteResourceFailure(MyUnitImpl *unit, BWAPI::Unit bwapiUnit, const char *command, const BWAPI::UnitType &type)
+    {
+        if (auto worker = dynamic_cast<MyWorkerImpl *>(unit)) worker->bnetResourceFailFrame = currentFrame;
+        BnetLog::resourceOrderFailed(command,
+                                     type.getName(),
+                                     bwapiUnit->getOrder().getName(),
+                                     BWAPI::Broodwar->getLastError().getName());
+    }
 }
 
 void MyUnitImpl::move(BWAPI::Position position, bool force)
@@ -90,6 +109,23 @@ void MyUnitImpl::move(BWAPI::Position position, bool force)
                                                             type == BWAPI::UnitTypes::Protoss_Observer)
                            : 0;
             auto lastTarget = bwapiUnit->getLastCommand().getTargetPosition();
+
+            // Arrived-unit guard: the unit is already at its last move target and the new target is (nearly) the same
+            if (BnetPolicy::skipArrivedMove(true,
+                                            force,
+                                            bwapiUnit->isStuck(),
+                                            true,
+                                            lastTarget.getApproxDistance(position),
+                                            bnetConfig.arrivedMoveTolerancePx,
+                                            currentFrame - lastCommandFrame,
+                                            bnetConfig.arrivedMoveHoldFrames,
+                                            lastPosition.getApproxDistance(lastTarget),
+                                            bnetConfig.moveGuardMinRemainingPx))
+            {
+                BnetLog::arrivedMoveHeld();
+                return true;
+            }
+
             BnetPolicy::MoveGuardInput guard{
                     bnetConfig.combatMoveGuard && interval > 0,
                     force,
@@ -240,6 +276,11 @@ void MyUnitImpl::rightClick(BWAPI::Unit target)
             stats.blockedInterval++;
             return;
         }
+        if (resourceBackoffBlocks(this))
+        {
+            stats.blockedBackoff++;
+            return;
+        }
         if (!resourceOrderBudgetAvailable())
         {
             stats.blockedBudget++;
@@ -250,6 +291,7 @@ void MyUnitImpl::rightClick(BWAPI::Unit target)
     auto result = bwapiUnit->rightClick(target);
     if (result && isResourceClick) countResourceOrder();
     if (result && guarded) BnetLog::resourceOrders().issued++;
+    if (!result && guarded) noteResourceFailure(this, bwapiUnit, "right_click", type);
 
     if (result)
     {
@@ -320,6 +362,11 @@ bool MyWorkerImpl::gather(BWAPI::Unit target)
                 return false;
             }
         }
+        if (resourceBackoffBlocks(this))
+        {
+            stats.blockedBackoff++;
+            return false;
+        }
         if (!resourceOrderBudgetAvailable())
         {
             stats.blockedBudget++;
@@ -334,6 +381,10 @@ bool MyWorkerImpl::gather(BWAPI::Unit target)
         gatherCommandFrames.insert(currentFrame);
         countResourceOrder();
         if (guarded) BnetLog::resourceOrders().issued++;
+    }
+    else if (guarded)
+    {
+        noteResourceFailure(this, bwapiUnit, "gather", type);
     }
 
 #if DEBUG_UNIT_ORDERS
@@ -394,6 +445,11 @@ bool MyWorkerImpl::returnCargo()
             stats.blockedInterval++;
             return false;
         }
+        if (resourceBackoffBlocks(this))
+        {
+            stats.blockedBackoff++;
+            return false;
+        }
         if (!resourceOrderBudgetAvailable())
         {
             stats.blockedBudget++;
@@ -408,6 +464,10 @@ bool MyWorkerImpl::returnCargo()
         returnCommandFrames.insert(currentFrame);
         countResourceOrder();
         if (guarded) BnetLog::resourceOrders().issued++;
+    }
+    else if (guarded)
+    {
+        noteResourceFailure(this, bwapiUnit, "return_cargo", type);
     }
 
 #if DEBUG_UNIT_ORDERS

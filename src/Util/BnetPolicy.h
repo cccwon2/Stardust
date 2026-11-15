@@ -654,4 +654,90 @@ namespace BnetPolicy
         if (!enabled || frame >= untilFrame) return false;
         return starport || controlTower || dropship;
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // PvP vs. robo / shuttle-reaver and gas-blocked expansion (2026-11-15 Radeon replay)
+    // ---------------------------------------------------------------------------------------------
+
+    enum class PvpNaturalReason { None, KeepIncomplete, GasBlocked, MineralFloat };
+
+    inline const char *pvpNaturalReasonName(PvpNaturalReason reason)
+    {
+        switch (reason)
+        {
+            case PvpNaturalReason::None: return "none";
+            case PvpNaturalReason::KeepIncomplete: return "keep_incomplete";
+            case PvpNaturalReason::GasBlocked: return "gas_blocked";
+            case PvpNaturalReason::MineralFloat: return "mineral_float";
+        }
+        return "none";
+    }
+
+    struct PvpNaturalInput
+    {
+        bool enabled;               // pvp_robo_fix && pvp_natural_fix
+        bool underConstruction;     // our natural nexus is placed but not completed
+        int frame;
+        int naturalFrame;           // upstream earliest natural frame (10000, 6500 backdoor, 12000 vs. dragoon all-in)
+        int minerals;
+        int gas;
+        int reexpandFrame;          // pvp_reexpand_frame (0 = off)
+        int reexpandMinerals;       // pvp_reexpand_minerals
+        int enemyValueAtNatural;    // CombatSim value of enemy combat units at the natural
+        int threatValue;            // At or above this, upstream decides (cancel / wait)
+    };
+
+    // Overrides the upstream PvP natural decision (Normal / ThreeGateRobo / MidGame) when the expansion is safe:
+    // upstream only expanded with an attack squad of 5+ units beyond the natural, checked the gas-blocked case after
+    // that, and cancelled an incomplete natural whenever the army went home. Returns None to keep upstream behavior.
+    inline PvpNaturalReason pvpNaturalOverride(const PvpNaturalInput &in)
+    {
+        if (!in.enabled) return PvpNaturalReason::None;
+        if (in.threatValue > 0 && in.enemyValueAtNatural >= in.threatValue) return PvpNaturalReason::None;
+        if (in.underConstruction) return PvpNaturalReason::KeepIncomplete;
+        if (in.frame >= in.naturalFrame && in.minerals > 500 && in.gas < 100) return PvpNaturalReason::GasBlocked;
+        if (in.reexpandFrame > 0 && in.frame >= in.reexpandFrame && in.minerals >= in.reexpandMinerals)
+        {
+            return PvpNaturalReason::MineralFloat;
+        }
+        return PvpNaturalReason::None;
+    }
+
+    // Enemy robotics tech seen (robotics facility, support bay, observatory, shuttle, reaver): get our own observer
+    // without waiting for a second gas (upstream required 2 completed assimilators or 2 nexus after frame 10000)
+    inline bool pvpRoboTechSeen(bool enabled, bool robo, bool supportBay, bool observatory, bool shuttle, bool reaver)
+    {
+        return enabled && (robo || supportBay || observatory || shuttle || reaver);
+    }
+
+    // Shuttle / reaver drop threat: support bay, shuttle or reaver seen
+    inline bool pvpDropThreat(bool enabled, bool supportBay, bool shuttle, bool reaver)
+    {
+        return enabled && (supportBay || shuttle || reaver);
+    }
+
+    // Arrived-unit move guard (arrived_move_hold_frames): a non-worker unit that is already at its move target
+    // (within move_guard_min_remaining_px) is not sent the same move again (within arrived_move_tolerance_px) until
+    // hold frames have passed. Upstream resent such moves every latency + 3 frames once the unit stopped moving
+    // (Radeon replay: 9,617 of 16,128 moves repeated the previous target, most within 4-19 frames).
+    inline bool skipArrivedMove(bool enabled, bool force, bool stuck, bool lastWasMove, int distToLastTarget, int tolerance,
+                                int framesSinceLastCommand, int holdFrames, int remainingToLastTarget, int arrivedPx)
+    {
+        if (!enabled || holdFrames <= 0 || force || stuck || !lastWasMove) return false;
+        if (distToLastTarget > tolerance) return false;
+        if (remainingToLastTarget > arrivedPx) return false;
+        return framesSinceLastCommand < holdFrames;
+    }
+
+    // Per-worker backoff after BWAPI rejected a resource command (resource_fail_backoff_frames)
+    inline bool resourceBackoffActive(int lastFailFrame, int frame, int backoffFrames)
+    {
+        return backoffFrames > 0 && lastFailFrame >= 0 && (frame - lastFailFrame) < backoffFrames;
+    }
+
+    // Supply drop event: our supply fell by at least minDrop from its peak in the trailing window
+    inline bool supplyDropDetected(int peakSupply, int currentSupply, int minDrop)
+    {
+        return minDrop > 0 && (peakSupply - currentSupply) >= minDrop;
+    }
 }

@@ -51,6 +51,8 @@ namespace BnetLog
         int blockedInterval = 0;   // Same command to the same target within min_command_interval_frames
         int blockedAlready = 0;    // Already moving to / waiting at / mining the target, or already returning cargo
         int blockedBudget = 0;     // max_orders_per_frame exhausted
+        int blockedBackoff = 0;    // Worker still in resource_fail_backoff_frames after a rejected command
+        int failed = 0;            // Command sent to BWAPI but rejected (returned false)
     };
     ResourceOrderStats &resourceOrders();
 
@@ -92,6 +94,14 @@ namespace BnetLog
 
     // Workers sent away from a vulture instead of attacking it (worker_flee_vultures)
     void workerFlee();
+
+    // Resource command rejected by BWAPI (counted in res_failed). The first few and then every 500th are also written as
+    // [EVENT] res_failed lines with the command, unit type, order and BWAPI error.
+    void resourceOrderFailed(const std::string &command, const std::string &unitType, const std::string &order,
+                             const std::string &error);
+
+    // Non-worker moves skipped by the arrived-unit move guard (arrived_move_hold_frames)
+    void arrivedMoveHeld();
 
     // PvT mech expansion gate state change (logged as an [EVENT] line only when the state changes)
     void mechExpandGate(bool blocked, int bases, int armyUnits, int required);

@@ -534,6 +534,62 @@ namespace
         CHECK(!dropRisk(false, true, true, true, 5000, 12000));
         CHECK(!dropRisk(true, false, false, false, 5000, 12000));
     }
+
+    void testPvpRobo()
+    {
+        using R = PvpNaturalReason;
+        PvpNaturalInput in{true, false, 13000, 10000, 600, 50, 12000, 400, 0, 500};
+        CHECK(pvpNaturalOverride(in) == R::GasBlocked);
+        in.gas = 200;
+        CHECK(pvpNaturalOverride(in) == R::MineralFloat);
+        in.minerals = 300;
+        CHECK(pvpNaturalOverride(in) == R::None);
+        in.frame = 11000; in.minerals = 450;
+        CHECK(pvpNaturalOverride(in) == R::None);              // before reexpand frame, not gas blocked
+        in.minerals = 600; in.gas = 50; in.frame = 9000;
+        CHECK(pvpNaturalOverride(in) == R::None);              // gas blocked but before the natural frame
+        in.underConstruction = true;
+        CHECK(pvpNaturalOverride(in) == R::KeepIncomplete);
+        in.enemyValueAtNatural = 500;
+        CHECK(pvpNaturalOverride(in) == R::None);              // threatened: upstream decides
+        in.enemyValueAtNatural = 499;
+        CHECK(pvpNaturalOverride(in) == R::KeepIncomplete);
+        in.enabled = false;
+        CHECK(pvpNaturalOverride(in) == R::None);
+        in = PvpNaturalInput{true, false, 20000, 10000, 1000, 500, 0, 400, 0, 500};
+        CHECK(pvpNaturalOverride(in) == R::None);              // reexpand off, not gas blocked
+        CHECK(std::string(pvpNaturalReasonName(R::GasBlocked)) == "gas_blocked");
+        CHECK(std::string(pvpNaturalReasonName(R::KeepIncomplete)) == "keep_incomplete");
+
+        CHECK(pvpRoboTechSeen(true, true, false, false, false, false));
+        CHECK(pvpRoboTechSeen(true, false, false, false, false, true));
+        CHECK(!pvpRoboTechSeen(true, false, false, false, false, false));
+        CHECK(!pvpRoboTechSeen(false, true, true, true, true, true));
+        CHECK(pvpDropThreat(true, false, true, false));
+        CHECK(pvpDropThreat(true, true, false, false));
+        CHECK(!pvpDropThreat(true, false, false, false));
+        CHECK(!pvpDropThreat(false, true, true, true));
+
+        // Arrived move guard
+        CHECK(skipArrivedMove(true, false, false, true, 8, 16, 10, 48, 20, 48));
+        CHECK(!skipArrivedMove(true, false, false, true, 8, 16, 48, 48, 20, 48));   // hold elapsed
+        CHECK(!skipArrivedMove(true, false, false, true, 32, 16, 10, 48, 20, 48));  // different target
+        CHECK(!skipArrivedMove(true, false, false, true, 8, 16, 10, 48, 100, 48));  // not arrived yet
+        CHECK(!skipArrivedMove(true, true, false, true, 8, 16, 10, 48, 20, 48));    // forced
+        CHECK(!skipArrivedMove(true, false, true, true, 8, 16, 10, 48, 20, 48));    // stuck
+        CHECK(!skipArrivedMove(true, false, false, false, 8, 16, 10, 48, 20, 48));  // last was not a move
+        CHECK(!skipArrivedMove(true, false, false, true, 8, 16, 10, 0, 20, 48));    // off
+        CHECK(!skipArrivedMove(false, false, false, true, 8, 16, 10, 48, 20, 48));
+
+        CHECK(resourceBackoffActive(100, 110, 24));
+        CHECK(!resourceBackoffActive(100, 124, 24));
+        CHECK(!resourceBackoffActive(-1, 10, 24));
+        CHECK(!resourceBackoffActive(100, 101, 0));
+
+        CHECK(supplyDropDetected(57, 37, 20));
+        CHECK(!supplyDropDetected(57, 38, 20));
+        CHECK(!supplyDropDetected(57, 0, 0));
+    }
 }
 
 int main()
@@ -552,6 +608,7 @@ int main()
     testPvzAllIn();
     testCombatFix();
     testAntiVulture();
+    testPvpRobo();
 
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

@@ -206,6 +206,17 @@ namespace BnetConfig
                 read(json, "pluto_rescout_max_frames", config.plutoRescoutMaxFrames);
                 read(json, "drop_risk_detection", config.dropRiskDetection);
                 read(json, "midgame_strategy_hold_frames", config.midgameStrategyHoldFrames);
+                read(json, "pvp_robo_fix", config.pvpRoboFix);
+                read(json, "pvp_natural_fix", config.pvpNaturalFix);
+                read(json, "pvp_reexpand_frame", config.pvpReexpandFrame);
+                read(json, "pvp_reexpand_minerals", config.pvpReexpandMinerals);
+                read(json, "pvp_robo_observer", config.pvpRoboObserver);
+                read(json, "pvp_home_guard_dragoons", config.pvpHomeGuardDragoons);
+                read(json, "pvp_drop_cannons", config.pvpDropCannons);
+                read(json, "arrived_move_hold_frames", config.arrivedMoveHoldFrames);
+                read(json, "arrived_move_tolerance_px", config.arrivedMoveTolerancePx);
+                read(json, "resource_fail_backoff_frames", config.resourceFailBackoffFrames);
+                read(json, "supply_drop_event", config.supplyDropEvent);
                 read(json, "print_build_info", config.printBuildInfo);
                 read(json, "bnet_log", config.bnetLog);
 
@@ -271,6 +282,14 @@ namespace BnetConfig
         config.plutoRescoutFrame = config.plutoRescoutFrame <= 0 ? 0 : std::clamp(config.plutoRescoutFrame, 2000, 12000);
         config.plutoRescoutMaxFrames = std::clamp(config.plutoRescoutMaxFrames, 240, 4800);
         config.midgameStrategyHoldFrames = std::clamp(config.midgameStrategyHoldFrames, 0, 2400);
+        config.pvpReexpandFrame = config.pvpReexpandFrame <= 0 ? 0 : std::clamp(config.pvpReexpandFrame, 6000, 30000);
+        config.pvpReexpandMinerals = std::clamp(config.pvpReexpandMinerals, 150, 2000);
+        config.pvpHomeGuardDragoons = std::clamp(config.pvpHomeGuardDragoons, 0, 4);
+        config.pvpDropCannons = std::clamp(config.pvpDropCannons, 0, 2);
+        config.arrivedMoveHoldFrames = std::clamp(config.arrivedMoveHoldFrames, 0, 240);
+        config.arrivedMoveTolerancePx = std::clamp(config.arrivedMoveTolerancePx, 0, 128);
+        config.resourceFailBackoffFrames = std::clamp(config.resourceFailBackoffFrames, 0, 240);
+        config.supplyDropEvent = std::clamp(config.supplyDropEvent, 0, 200);
     }
 
     const Config &get()
@@ -366,6 +385,17 @@ namespace BnetConfig
            << " pluto_rescout_max_frames=" << config.plutoRescoutMaxFrames
            << " drop_risk_detection=" << config.dropRiskDetection
            << " midgame_strategy_hold_frames=" << config.midgameStrategyHoldFrames
+           << " pvp_robo_fix=" << config.pvpRoboFix
+           << " pvp_natural_fix=" << config.pvpNaturalFix
+           << " pvp_reexpand_frame=" << config.pvpReexpandFrame
+           << " pvp_reexpand_minerals=" << config.pvpReexpandMinerals
+           << " pvp_robo_observer=" << config.pvpRoboObserver
+           << " pvp_home_guard_dragoons=" << config.pvpHomeGuardDragoons
+           << " pvp_drop_cannons=" << config.pvpDropCannons
+           << " arrived_move_hold_frames=" << config.arrivedMoveHoldFrames
+           << " arrived_move_tolerance_px=" << config.arrivedMoveTolerancePx
+           << " resource_fail_backoff_frames=" << config.resourceFailBackoffFrames
+           << " supply_drop_event=" << config.supplyDropEvent
            << " print_build_info=" << config.printBuildInfo
            << " bnet_log=" << config.bnetLog;
         return os.str();

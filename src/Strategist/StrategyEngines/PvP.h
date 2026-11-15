@@ -76,6 +76,11 @@ public:
 private:
     int enemyStrategyChanged;
 
+    // Battle.net PvP robo fix (pvp_robo_fix): state for one-time [EVENT] lines
+    bool bnetDropThreat = false;
+    bool bnetRoboSeen = false;
+    int bnetNaturalReason = 0;
+
     ProtossStrategy recognizeEnemyStrategy();
 
     OurStrategy chooseOurStrategy(ProtossStrategy newEnemyStrategy, std::vector<std::shared_ptr<Play>> &plays);

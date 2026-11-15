@@ -1,14 +1,18 @@
 #include "BnetLog.h"
 
 #include "BnetConfig.h"
+#include "BnetPolicy.h"
 #include "Opponent.h"
 #include "Workers.h"
+#include "Units.h"
 
 #include <BWAPI.h>
 
+#include <algorithm>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <sstream>
 
 #ifndef STARDUST_BUILD_ID
@@ -91,6 +95,12 @@ namespace BnetLog
         int mechGateBlocks = 0;     // Number of open -> blocked transitions
         int invalidMoves = 0;
         int workerFlees = 0;
+        int arrivedHolds = 0;
+    }
+
+    void arrivedMoveHeld()
+    {
+        arrivedHolds++;
     }
 
     void mechDecision(bool wasAttacking, bool nowAttacking)
@@ -189,6 +199,7 @@ namespace BnetLog
             mechGateBlocks = 0;
             invalidMoves = 0;
             workerFlees = 0;
+            arrivedHolds = 0;
         }
 
         // Cumulative counters, appended to [APM] and [END]
@@ -202,6 +213,8 @@ namespace BnetLog
                << " res_blocked_interval=" << r.blockedInterval
                << " res_blocked_already=" << r.blockedAlready
                << " res_blocked_budget=" << r.blockedBudget
+               << " res_blocked_backoff=" << r.blockedBackoff
+               << " res_failed=" << r.failed
                << " stuck_attempts=" << rec.attempts
                << " stuck_reassign=" << rec.reassigned
                << " stuck_cmd_ok=" << rec.commandOk
@@ -227,6 +240,7 @@ namespace BnetLog
                << " mech_gate_blocks=" << mechGateBlocks
                << " invalid_moves=" << invalidMoves
                << " worker_flees=" << workerFlees
+               << " arrived_holds=" << arrivedHolds
                << " latency_max=" << BnetConfig::maxLatencyFrames()
                << " cmd_interval=" << BnetConfig::commandIntervalFrames();
             return os.str();
@@ -249,6 +263,27 @@ namespace BnetLog
         int maxApm = 0;
         std::string lastEnemyStrategy;
         std::string lastMyStrategy;
+
+        // Supply drop detection (supply_drop_event): supply sampled every second over the last 30 game seconds
+        const int supplySampleFrames = 24;
+        const int supplyWindowSamples = 30;
+        int supplySamples[supplyWindowSamples] = {};
+        int supplySampleCount = 0;
+        int nextSupplySampleFrame = 0;
+        int lastSupplyDropFrame = -100000;
+
+        // Enemy tech seen (logged once per type)
+        std::set<std::string> enemyTechLogged;
+        int nextTechCheckFrame = 0;
+
+        void resetSamplers()
+        {
+            supplySampleCount = 0;
+            nextSupplySampleFrame = 0;
+            lastSupplyDropFrame = -100000;
+            enemyTechLogged.clear();
+            nextTechCheckFrame = 0;
+        }
 
         std::string timestamp()
         {
@@ -291,6 +326,7 @@ namespace BnetLog
         maxApm = 0;
         lastEnemyStrategy.clear();
         lastMyStrategy.clear();
+        resetSamplers();
 
         if (!BnetConfig::get().bnetLog) return;
 
@@ -351,9 +387,87 @@ namespace BnetLog
         }
     }
 
+    void resourceOrderFailed(const std::string &command, const std::string &unitType, const std::string &order,
+                             const std::string &error)
+    {
+        int failed = ++resourceOrderStats.failed;
+        if (failed <= 3 || failed % 500 == 0)
+        {
+            writeLine("EVENT", "res_failed cmd=" + command + " unit=" + unitType + " order=" + order + " error=\"" + error
+                               + "\" count=" + std::to_string(failed));
+        }
+    }
+
+    namespace
+    {
+        void sampleSupply()
+        {
+            if (currentFrame < nextSupplySampleFrame) return;
+            nextSupplySampleFrame = currentFrame + supplySampleFrames;
+
+            int minDrop = BnetConfig::get().supplyDropEvent;
+            if (minDrop <= 0) return;
+
+            int supply = BWAPI::Broodwar->self()->supplyUsed() / 2;
+            supplySamples[supplySampleCount % supplyWindowSamples] = supply;
+            supplySampleCount++;
+
+            int samples = std::min(supplySampleCount, supplyWindowSamples);
+            int peak = 0;
+            for (int i = 0; i < samples; i++) peak = std::max(peak, supplySamples[i]);
+
+            if (currentFrame - lastSupplyDropFrame < supplySampleFrames * supplyWindowSamples) return;
+            if (!BnetPolicy::supplyDropDetected(peak, supply, minDrop)) return;
+            lastSupplyDropFrame = currentFrame;
+
+            std::ostringstream os;
+            os << "supply_drop from=" << peak << " to=" << supply << " window_s=" << (supplyWindowSamples * supplySampleFrames / 24)
+               << " workers=" << BWAPI::Broodwar->self()->completedUnitCount(BWAPI::Broodwar->self()->getRace().getWorker());
+            writeLine("EVENT", os.str());
+        }
+
+        void checkEnemyTech()
+        {
+            if (currentFrame < nextTechCheckFrame) return;
+            nextTechCheckFrame = currentFrame + 24;
+
+            static const BWAPI::UnitType techTypes[] = {
+                    BWAPI::UnitTypes::Protoss_Robotics_Facility,
+                    BWAPI::UnitTypes::Protoss_Robotics_Support_Bay,
+                    BWAPI::UnitTypes::Protoss_Observatory,
+                    BWAPI::UnitTypes::Protoss_Shuttle,
+                    BWAPI::UnitTypes::Protoss_Reaver,
+                    BWAPI::UnitTypes::Protoss_Citadel_of_Adun,
+                    BWAPI::UnitTypes::Protoss_Templar_Archives,
+                    BWAPI::UnitTypes::Protoss_Dark_Templar,
+                    BWAPI::UnitTypes::Protoss_High_Templar,
+                    BWAPI::UnitTypes::Protoss_Stargate,
+                    BWAPI::UnitTypes::Protoss_Arbiter,
+                    BWAPI::UnitTypes::Protoss_Carrier,
+                    BWAPI::UnitTypes::Terran_Factory,
+                    BWAPI::UnitTypes::Terran_Starport,
+                    BWAPI::UnitTypes::Terran_Dropship,
+                    BWAPI::UnitTypes::Terran_Siege_Tank_Tank_Mode,
+                    BWAPI::UnitTypes::Terran_Science_Vessel,
+                    BWAPI::UnitTypes::Zerg_Lair,
+                    BWAPI::UnitTypes::Zerg_Spire,
+                    BWAPI::UnitTypes::Zerg_Hydralisk_Den,
+                    BWAPI::UnitTypes::Zerg_Lurker,
+                    BWAPI::UnitTypes::Zerg_Mutalisk};
+            for (const auto &type : techTypes)
+            {
+                if (!Units::hasEnemyBuilt(type)) continue;
+                if (!enemyTechLogged.insert(type.getName()).second) continue;
+                writeLine("EVENT", "enemy_tech_seen type=" + type.getName());
+            }
+        }
+    }
+
     void onFrame()
     {
         if (!active) return;
+        sampleSupply();
+        checkEnemyTech();
         if (currentFrame < nextApmFrame) return;
         nextApmFrame = currentFrame + apmIntervalFrames;
 
@@ -370,6 +484,10 @@ namespace BnetLog
            << " bwapi_apm=" << apm
            << " latency_frames=" << BWAPI::Broodwar->getLatencyFrames()
            << " supply=" << (BWAPI::Broodwar->self()->supplyUsed() / 2)
+           << " minerals=" << BWAPI::Broodwar->self()->minerals()
+           << " gas=" << BWAPI::Broodwar->self()->gas()
+           << " depots=" << BWAPI::Broodwar->self()->completedUnitCount(BWAPI::Broodwar->self()->getRace().getResourceDepot())
+           << " refineries=" << BWAPI::Broodwar->self()->completedUnitCount(BWAPI::Broodwar->self()->getRace().getRefinery())
            << " " << counters();
         writeLine("APM", os.str());
     }
@@ -429,6 +547,10 @@ namespace BnetLog
     }
 #else
     void invalidMove(const std::string &) { invalidMoves++; }
+    void resourceOrderFailed(const std::string &, const std::string &, const std::string &, const std::string &)
+    {
+        resourceOrderStats.failed++;
+    }
     void gameStart() { resetCounters(); }
     void onFrame() {}
     void enemyStrategyChanged(const std::string &) {}

@@ -37,6 +37,9 @@ public:
     // duplicate gather / return cargo / resource right-click guards for this worker only.
     bool bnetSimpleGather = false;
 
+    // Battle.net: frame of the last resource command BWAPI rejected (resource_fail_backoff_frames), -1 = none
+    int bnetResourceFailFrame = -1;
+
     explicit MyWorkerImpl(BWAPI::Unit unit);
 
     void update(BWAPI::Unit unit) override;
