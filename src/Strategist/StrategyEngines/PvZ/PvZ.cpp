@@ -252,9 +252,22 @@ void PvZ::initialize(std::vector<std::shared_ptr<Play>> &plays, bool transitioni
                             OurStrategyNames[OurStrategy::EarlyGameDefense]
                     });
         }
-        if ((opening == OurStrategyNames[OurStrategy::SairSpeedlot]
-             || opening == OurStrategyNames[OurStrategy::FFEDragoons])
-            && BuildingPlacement::hasForgeGatewayWall())
+        bool forgeFastExpand = (opening == OurStrategyNames[OurStrategy::SairSpeedlot]
+                                || opening == OurStrategyNames[OurStrategy::FFEDragoons])
+                               && BuildingPlacement::hasForgeGatewayWall();
+        // The wall pylon replaces the main supply pylon. If no probe can walk there,
+        // that pylon is never ordered and the game stays at 9 supply. Use the main
+        // opening instead. A reachable wall keeps forge fast expand.
+        if (forgeFastExpand && !BuildingPlacement::workerCanReach(
+                BuildingPlacement::getForgeGatewayWall().pylon,
+                BWAPI::UnitTypes::Protoss_Pylon))
+        {
+            Log::Get() << "Wall pylon " << BuildingPlacement::getForgeGatewayWall().pylon
+                       << " is not reachable from our probes; using EarlyGameDefense";
+            BnetLog::event("pvz_wall_pylon_unreachable fallback=EarlyGameDefense");
+            forgeFastExpand = false;
+        }
+        if (forgeFastExpand)
         {
             plays.emplace_back(std::make_shared<ForgeFastExpand>());
             if (opening == OurStrategyNames[OurStrategy::SairSpeedlot])
