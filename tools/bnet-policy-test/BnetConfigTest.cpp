@@ -49,7 +49,7 @@ int main(){
   BnetConfig::initialize(); c=BnetConfig::get();
   C(c.combatMoveIntervalFrames==12 && c.observerMoveIntervalFrames==24 && c.moveGuardMinRemainingPx==48);
   C(c.gridWaypointHold && c.gridWaypointRefreshPx==64 && c.spellResendIntervalFrames==24 && c.unstickBackoffMaxFrames==192);
-  C(c.mechNaturalCannons==2 && c.expansionCannons==1 && c.cannonThreatPriority);
+  C(c.mechNaturalCannons==2 && c.expansionCannons==2 && c.cannonThreatPriority);
   w("{\"expansion_cannons\": 5, \"mech_natural_cannons\": -1, \"grid_waypoint_refresh_px\": 1, \"combat_move_interval_frames\": 99, \"observer_move_interval_frames\": 999, \"unstick_backoff_max_frames\": 0, \"grid_waypoint_hold\": false, \"cannon_threat_priority\": false}");
   BnetConfig::initialize(); c=BnetConfig::get();
   C(c.expansionCannons==2 && c.mechNaturalCannons==0 && c.gridWaypointRefreshPx==16 && c.combatMoveIntervalFrames==48);
@@ -104,6 +104,18 @@ int main(){
   BnetConfig::initialize(); c=BnetConfig::get();
   C(!c.stackedMineralIdentityFix && !c.mineralAssignmentFix && c.miningAssignmentLog);
   C(BnetConfig::summary().find("stacked_mineral_identity_fix=0") != std::string::npos);
+  w("{}"); BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.armyStateLog && c.armyStateIntervalFrames==720 && c.homeMineClear && c.homeMineClearRadiusPx==960);
+  C(c.rearClusterUnstickFrames==480 && c.rearClusterHomeRadiusPx==1280 && c.expansionSelectFix && c.expansionMaxDistancePx==2500);
+  C(c.expansionGuardDragoons==2 && c.expansionDefenseRedirect && c.defenseRedirectRatio==1.2 && c.defenseRedirectMinDragoons==3);
+  C(c.expansionCannonAtNexusStart && c.cannonRebuildBackoffFrames==480 && c.expansionCannons==2);
+  w("{\"army_state_log\": false, \"army_state_interval_frames\": 1, \"home_mine_clear\": false, \"home_mine_clear_radius_px\": 99999, \"rear_cluster_unstick_frames\": -5, \"rear_cluster_home_radius_px\": 99999, \"expansion_select_fix\": false, \"expansion_max_distance_px\": -1, \"expansion_guard_dragoons\": 9, \"expansion_defense_redirect\": false, \"defense_redirect_ratio\": 9.5, \"defense_redirect_min_dragoons\": 0, \"expansion_cannon_at_nexus_start\": false, \"cannon_rebuild_backoff_frames\": 99999}");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(!c.armyStateLog && c.armyStateIntervalFrames==120 && !c.homeMineClear && c.homeMineClearRadiusPx==4000);
+  C(c.rearClusterUnstickFrames==0 && c.rearClusterHomeRadiusPx==6000 && !c.expansionSelectFix && c.expansionMaxDistancePx==0);
+  C(c.expansionGuardDragoons==4 && !c.expansionDefenseRedirect && c.defenseRedirectRatio==5.0 && c.defenseRedirectMinDragoons==1);
+  C(!c.expansionCannonAtNexusStart && c.cannonRebuildBackoffFrames==4800);
+  C(BnetConfig::summary().find("rear_cluster_unstick_frames=0") != std::string::npos);
   printf("%s\n", BnetConfig::summary().c_str());
   printf("fails=%d\n",fails); return fails;
 }

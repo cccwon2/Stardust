@@ -123,9 +123,13 @@ protected:
 
     // mainHomeGuardValue (Battle.net home guard): minimum enemy value used for our main while the main army is attacking,
     // so a DefendBase play keeps a few units at home even when no enemy is there yet. 0 = upstream behavior.
-    static void updateDefendBasePlays(std::vector<std::shared_ptr<Play>> &plays, int mainHomeGuardValue = 0);
+    // expansionGuardValue (expansion_guard_dragoons): the same for every 3rd+ base. 0 = upstream behavior.
+    static void updateDefendBasePlays(std::vector<std::shared_ptr<Play>> &plays, int mainHomeGuardValue = 0,
+                                      int expansionGuardValue = 0);
 
-    static void updateAttackPlays(std::vector<std::shared_ptr<Play>> &plays, bool defendOurMain);
+    // targetOverride (expansion_defense_redirect): one of our own bases the main army should defend instead of attacking.
+    // nullptr = upstream behavior.
+    static void updateAttackPlays(std::vector<std::shared_ptr<Play>> &plays, bool defendOurMain, Base *targetOverride = nullptr);
 
     static void updateSpecialTeamsPlays(std::vector<std::shared_ptr<Play>> &plays);
 

@@ -667,6 +667,69 @@ namespace
         CHECK(sendIdleMinerToDepot(true, false));
         CHECK(!sendIdleMinerToDepot(true, true));
     }
+    void testArmyDefense()
+    {
+        CHECK(homeMineNeedsDetection(true, true, true, true, 160, 960));
+        CHECK(!homeMineNeedsDetection(false, true, true, true, 160, 960));
+        CHECK(!homeMineNeedsDetection(true, false, true, true, 160, 960));
+        CHECK(!homeMineNeedsDetection(true, true, false, true, 160, 960));
+        CHECK(!homeMineNeedsDetection(true, true, true, false, 160, 960));
+        CHECK(!homeMineNeedsDetection(true, true, true, true, 1200, 960));
+        CHECK(!homeMineNeedsDetection(true, true, true, true, -1, 960));
+
+        CHECK(clusterNearHome(-1, 300, 1280));
+        CHECK(clusterNearHome(1000, -1, 1280));
+        CHECK(!clusterNearHome(2000, 1500, 1280));
+        CHECK(!clusterNearHome(100, 100, 0));
+
+        CHECK(rearClusterUnstick(480, false, true, true, 0, true, 480, false));
+        CHECK(!rearClusterUnstick(480, false, true, true, 0, true, 479, false));
+        CHECK(rearClusterUnstick(480, false, true, true, 0, false, 0, true));
+        CHECK(!rearClusterUnstick(480, false, true, true, 1, true, 4800, true));
+        CHECK(!rearClusterUnstick(480, true, true, true, 0, true, 4800, false));
+        CHECK(!rearClusterUnstick(480, false, false, true, 0, true, 4800, false));
+        CHECK(!rearClusterUnstick(480, false, true, false, 0, true, 4800, false));
+        CHECK(!rearClusterUnstick(0, false, true, true, 0, true, 4800, false));
+        CHECK(rearClusterForceFrames(480) == 240);
+        CHECK(rearClusterForceFrames(100) == 120);
+        CHECK(skipReinforcementWait(480, false, true));
+        CHECK(!skipReinforcementWait(0, false, true));
+        CHECK(!skipReinforcementWait(480, true, true));
+        CHECK(!skipReinforcementWait(480, false, false));
+
+        // Backrooms-like: far corner (distUs 3600, distEnemy 4200) vs near base (distUs 900, distEnemy 2000)
+        CHECK(expansionScore(false, 4200, 3600, 0, 0, 2500) > expansionScore(false, 2000, 900, 0, 0, 2500));
+        CHECK(expansionScore(true, 4200, 3600, 0, 0, 2500) < expansionScore(true, 2000, 900, 0, 0, 2500));
+        CHECK(expansionScore(true, 4200, 3600, 0, 0, 0) == 4200 - 7200);
+        CHECK(expansionScore(true, 9000, 2600, 0, 0, 2500) < expansionScore(true, 1000, 2400, 0, 0, 2500));
+        CHECK(expansionScore(false, 1000, 500, 1500, 500, 2500) == 1500 - 500 + 15 + 10);
+
+        CHECK(expansionGuardActive(true, 2, true, false));
+        CHECK(!expansionGuardActive(true, 0, true, false));
+        CHECK(!expansionGuardActive(true, 2, false, false));
+        CHECK(!expansionGuardActive(true, 2, true, true));
+        CHECK(!expansionGuardActive(false, 2, true, false));
+
+        CHECK(defenseRedirectStart(true, 1000, 1200, 600, 1.2));
+        CHECK(!defenseRedirectStart(true, 1000, 1199, 600, 1.2));
+        CHECK(!defenseRedirectStart(true, 500, 5000, 600, 1.2));
+        CHECK(!defenseRedirectStart(false, 1000, 5000, 600, 1.2));
+        CHECK(!defenseRedirectStart(true, 0, 5000, 0, 1.2));
+        CHECK(defenseRedirectKeep(100, 1000, 480, 2880));
+        CHECK(!defenseRedirectKeep(480, 1000, 480, 2880));
+        CHECK(!defenseRedirectKeep(0, 2880, 480, 2880));
+
+        CHECK(cannonBaseReady(true, true, false, false));
+        CHECK(!cannonBaseReady(true, false, false, true));
+        CHECK(cannonBaseReady(true, false, true, true));
+        CHECK(!cannonBaseReady(true, false, true, false));
+        CHECK(!cannonBaseReady(false, false, true, true));
+
+        CHECK(cannonTileBackoff(1000, 1200, 480));
+        CHECK(!cannonTileBackoff(1000, 1480, 480));
+        CHECK(!cannonTileBackoff(1000, 1200, 0));
+        CHECK(!cannonTileBackoff(-1, 1200, 480));
+    }
 }
 
 int main()
@@ -687,6 +750,7 @@ int main()
     testAntiVulture();
     testPvpRobo();
     testStackedMinerals();
+    testArmyDefense();
 
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

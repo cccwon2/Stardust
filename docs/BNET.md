@@ -195,7 +195,7 @@ In the same replay the third base had no cannon for 13 minutes against 108 vultu
 | Key | Default | Description |
 |---|---|---|
 | `mech_natural_cannons` | `2` | Natural cannon target raised to this under a mech / vulture threat (`TwoFactory` / `MidGameMech` / `MidGameBioMech` / 3+ vultures / a spider mine seen) (0-2). |
-| `expansion_cannons` | `1` | Cannons in the mineral line of every other owned base (third and later) under the same threat, once its nexus is complete. Set `2` for more vulture insurance (0-2). |
+| `expansion_cannons` | `2` | Cannons in the mineral line of every other owned base (third and later) under the same threat, once its nexus is placed (`expansion_cannon_at_nexus_start`; upstream timing: once it is complete). Was `1` before the Backrooms 1.1 army / expansion fix (0-2). |
 | `cannon_threat_priority` | `true` | Under the threat, the first cannon of each base (and its power pylon) is requested at `PRIORITY_BASEDEFENSE` instead of `PRIORITY_NORMAL`, so it is not starved by army production; the forge follows as a prerequisite. Further cannons stay at normal priority. |
 
 Each base writes `[EVENT] cannon_plan base=main|natural|expansion tile=x,y target=.. existing=.. requested=.. urgent=.. mech_threat=..` once per target count.
@@ -389,6 +389,66 @@ DefendBase scheduling (only while the main army is attacking).
 - Verified: policy unit tests (assignment simulation: one merged resource at distance 0 gives 1 of 4 probes a patch
   upstream, 2 with the fix; 8 fields at distance 0 take 8 of 12 probes upstream, 12 with the fix), config loader test and
   g++ syntax checks. Not verified: Windows build and an OdysseyRE game with the new build.
+
+## Army and expansion defense (2026-11-15 Backrooms 1.1 game, build `bnet-pluto@0264e7aa`)
+
+Game: Backrooms 1.1 vs. `zxcv_xczv` (Terran, `MidGameMech` from 5:36), loss at 13:48. Our main top right (119,8), natural
+(113,38); enemy main bottom right (117,121), natural (85,113).
+
+- Symptom 1 (3rd / 4th base): the 3rd nexus was placed at 8:37 in the far top-left corner (7,7), the 4th at 11:09 at
+  (39,12). From 12:00 an enemy group moved west, laid mines at (37-49,31-43), hit the 4th at 12:40 and the 3rd at
+  13:00-13:20. Our main army (23-28 units) stayed contained at (80-92,68-80) in front of the enemy minefield; 0-2 of our
+  units were near the 3rd / 4th. The expansion cannon plan was written only after each nexus completed (3rd 9:56, 4th
+  12:28); the 4th cannon was started at 12:29 and cancelled while dying (`build_cancel_dying` x6 at tile 39,10). Supply
+  fell from 149 to 129 at 12:52.
+- Symptom 2 (army idle at the natural): from 11:41 to 13:47, 22 newly produced units collected at (106-113,26-35) and
+  received 20-130 move orders each inside that small area (`arrived_holds` 635 at 8:03 -> 4666 at the end). An enemy
+  spider mine had been laid at (110,34) at 7:23. Two observers passed the spot at 11:22-11:25 and then went to the front.
+- Causes in the code (the mine cause is circumstantial: time and place match, unit types are not in the replay):
+  1. `UnitImpl::needsDetection()` is false for spider mines, so `Squad::updateDetectionNeeds` never asks observers to go
+     to a mine. A burrowed unit that was seen stays "known" until our detection covers its position, so the remembered
+     mine stays in the enemy list of every cluster nearby.
+  2. A non-vanguard cluster that decides to regroup stays regrouping while the sim does not favor attacking; in addition
+     `shouldStopRegrouping` keeps regrouping whenever the cluster gained units in the past 72 frames, which never ends
+     while production keeps adding units at home.
+  3. `computeProbableExpansions` scores our own expansions with `distEnemy * 3/2 - distUs`, which on 4-player maps
+     prefers the base farthest from the enemy (the opposite corner), far from our army.
+  4. `updateDefendBasePlays` drops a 3rd+ base when the enemy value there exceeds 5 dragoons and `DefendBase` only takes
+     dragoons with a safe path when pressure is at most 0.6, so a real attack on a 3rd+ base got no defense.
+  5. Expansion cannons were requested only after the nexus completed, and a cannon lost while building was re-requested
+     at once on the same tile.
+- Fixes (each behind its own switch):
+
+| Key | Default | Description |
+|---|---|---|
+| `army_state_log` / `army_state_interval_frames` | `true` / `720` | `[ARMY]` snapshot of every attack-squad cluster every 720 frames (30 s) and `[DEFENSE]` lines (below). |
+| `home_mine_clear` / `home_mine_clear_radius_px` | `true` / `960` | In `AttackBaseSquad`, a known burrowed spider mine within 960 px of one of our bases is added to the squad's detection needs, so one observer goes there and the dragoons can kill it. `DefendBase` squads are not changed (they release their units while they need detection without an observer). |
+| `rear_cluster_unstick_frames` | `480` | A non-vanguard cluster near home that has been regrouping for 480 frames (20 s) with no real threat nearby (spider mines and undetected units do not count) is forced to link up with the vanguard for `max(120, frames/2)` frames. Near home the "units joined in the past 72 frames" regroup rule is skipped. 0 = off. |
+| `rear_cluster_home_radius_px` | `1280` | "Near home" = within 1280 px of our main or natural. |
+| `expansion_select_fix` | `true` | Our own expansions vs. Terran (`pluto_pvt_snipe`): score `distEnemy - 2 * distUs` (+ resources), and bases whose ground distance from all our bases exceeds `expansion_max_distance_px` go last. |
+| `expansion_max_distance_px` | `2500` | See above. 0 = no limit. |
+| `expansion_guard_dragoons` | `2` | Under a mech / vulture threat (not during early bio / rush defense), every 3rd+ base keeps a `DefendBase` play with about 2 units even without enemies (same value formula as `home_guard_dragoons`). Upstream `DefendBase` rules still apply (dragoons with a safe path, pressure at most 0.6). 0 = off. |
+| `expansion_defense_redirect` | `true` | When a 3rd+ base has enemies worth at least `defense_redirect_min_dragoons` dragoons and the main army value is at least `defense_redirect_ratio` x that, the main army attacks toward that base (an `AttackEnemyBase` play on our own base) instead of the enemy. It returns 480 frames after the base is clear, after 2880 frames, or when the base is lost. |
+| `defense_redirect_ratio` / `defense_redirect_min_dragoons` | `1.2` / `3` | See above. |
+| `expansion_cannon_at_nexus_start` | `true` | Expansion cannons (and their pylon) are requested as soon as the nexus is placed. Main / natural timing unchanged. |
+| `cannon_rebuild_backoff_frames` | `480` | After a cannon (complete or under construction) at a cannon tile is lost, that tile is not re-requested for 480 frames. 0 = off. |
+
+- New log lines:
+  - `[ARMY] squad="..." tile=x,y units=.. vanguard=0|1 activity=.. sub=.. since=<frames in this activity> enemies=..
+    real_threats=.. mines=.. undetected=.. detectors=.. detectors_near=.. near_home=0|1 forced_move=0|1`.
+  - `[DEFENSE] base=x,y decision=guard|defend|idle|abandon_too_strong enemy_value=.. dragoon_value=.. pressure=..` when the
+    decision of a 3rd+ base changes; `[DEFENSE] redirect_skip base=.. enemy_value=.. army_value=..` (at most every 480
+    frames) when the main army was too weak to redirect; `[DEFENSE] expansion_order x,y(score) ...` when the order of
+    our next expansion candidates changes (with `expansion_select_fix`).
+  - `[EVENT] home_mine_clear tile=..`, `rear_unstick tile=.. units=.. regroup_frames=.. vanguard_tile=..`,
+    `defense_redirect start|end ...`, `expansion_guard start|end`, `cannon_backoff tile=..`.
+- New counters on `[APM]` / `[END]`: `rear_unsticks`, `mine_clear_requests`, `defense_redirects`, `expansion_guards`,
+  `cannon_backoffs`.
+- Not implemented: worker evacuation from a base that cannot be defended (the existing `worker_flee_vultures` still
+  applies), excluding undetected mines from the combat sim itself (the sim still sees them; only the rear-cluster
+  watchdog ignores them).
+- Verified: policy unit tests, config loader test and g++ syntax checks. Not verified: Windows build and a game with the
+  new build (the `[ARMY]` lines should confirm or reject the mine cause).
 
 ## Non-ASCII opponent names (2026-11-15)
 

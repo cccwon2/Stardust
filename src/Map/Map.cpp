@@ -26,6 +26,8 @@
 
 #include "NoGoAreas.h"
 #include "BnetLog.h"
+#include "BnetConfig.h"
+#include "BnetPolicy.h"
 
 #if INSTRUMENTATION_ENABLED
 #define CVIS_HEATMAPS true
@@ -227,6 +229,10 @@ namespace Map
             auto myBases = getMyBases(player);
             auto enemyBases = getEnemyBases(player);
 
+            bool bnetSelectFix = BnetConfig::get().expansionSelectFix && BnetConfig::get().plutoPvtSnipe
+                                 && player == BWAPI::Broodwar->self()
+                                 && BWAPI::Broodwar->enemy() && BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Terran;
+
             std::vector<std::tuple<int, Base *, bool>> scoredBases;
             for (auto &base : bases)
             {
@@ -261,12 +267,15 @@ namespace Map
                 int distanceFromEnemy = closestBaseDistance(base, enemyBases);
                 if (distanceFromEnemy == -1) distanceFromEnemy = 10000;
 
-                // Initialize score based on distances
-                int score = (distanceFromEnemy * 3) / 2 - distanceFromUs;
-
-                // Increase score based on available resources
-                score += base->minerals / 100;
-                score += base->gas / 50;
+                // Initialize score based on distances and available resources.
+                // Battle.net (expansion_select_fix, our own expansions vs Terran with pluto_pvt_snipe): weight the distance
+                // from our bases more and put bases far from all of them last (BnetPolicy::expansionScore).
+                int score = BnetPolicy::expansionScore(bnetSelectFix && !island,
+                                                       distanceFromEnemy,
+                                                       distanceFromUs,
+                                                       base->minerals,
+                                                       base->gas,
+                                                       BnetConfig::get().expansionMaxDistancePx);
 
                 scoredBases.emplace_back(score, base, island);
             }
@@ -278,6 +287,30 @@ namespace Map
             for (auto &scoredBase : scoredBases)
             {
                 (std::get<2>(scoredBase) ? playerBases.islandExpansions : playerBases.probableExpansions).push_back(std::get<1>(scoredBase));
+            }
+
+            // [DEFENSE] our next expansion candidates (army_state_log), once per distinct order
+            if (bnetSelectFix)
+            {
+                std::ostringstream os;
+                os << "expansion_order";
+                int n = 0;
+                for (auto &scoredBase : scoredBases)
+                {
+                    if (std::get<2>(scoredBase)) continue;
+                    os << " " << std::get<1>(scoredBase)->getTilePosition().x << "," << std::get<1>(scoredBase)->getTilePosition().y
+                       << "(" << std::get<0>(scoredBase) << ")";
+                    if (++n >= 3) break;
+                }
+                static std::string lastOrder;
+                static int lastOrderFrame = -1;
+                if (currentFrame < lastOrderFrame) lastOrder.clear();
+                lastOrderFrame = currentFrame;
+                if (os.str() != lastOrder)
+                {
+                    lastOrder = os.str();
+                    BnetLog::defense(lastOrder);
+                }
             }
         }
 

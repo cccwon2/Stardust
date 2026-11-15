@@ -96,6 +96,20 @@ private:
     // Pluto snipe: home guard dragoons at the main until the first observer (home_guard_dragoons), for logging
     bool plutoHomeGuard = false;
 
+    // Pluto snipe: main army redirected to defend one of our expansions (expansion_defense_redirect)
+    Base *plutoDefenseRedirectBase = nullptr;
+    int plutoDefenseRedirectStart = 0;
+    int plutoDefenseRedirectLastEnemy = 0;
+    int plutoDefenseRedirectSkipLogged = -10000;
+
+    // Pluto snipe: expansion guard state (expansion_guard_dragoons), for logging
+    bool plutoExpansionGuard = false;
+
+    // Pluto snipe: cannon tiles (x * 1000 + y) that had a cannon / pending cannon, and the frame a cannon there was lost
+    // (cannon_rebuild_backoff_frames)
+    std::set<int> plutoCannonTilesSeen;
+    std::map<int, int> plutoCannonTileLost;
+
     // Pluto snipe: second worker scout (pluto_rescout_frame) already added
     bool plutoRescoutAdded = false;
 

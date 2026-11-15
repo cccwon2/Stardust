@@ -24,7 +24,7 @@ namespace
     }
 }
 
-void StrategyEngine::updateAttackPlays(std::vector<std::shared_ptr<Play>> &plays, bool defendOurMain)
+void StrategyEngine::updateAttackPlays(std::vector<std::shared_ptr<Play>> &plays, bool defendOurMain, Base *targetOverride)
 {
     auto mainArmyPlay = getPlay<MainArmyPlay>(plays);
 
@@ -160,6 +160,8 @@ void StrategyEngine::updateAttackPlays(std::vector<std::shared_ptr<Play>> &plays
     }
 
     // Choose the target for the main army
+    // Battle.net (expansion_defense_redirect): defend one of our expansions under a real attack first
+    if (targetOverride) mainArmyTarget = targetOverride;
     if (!mainArmyTarget) mainArmyTarget = lowestEnemyValueBase;
     if (!mainArmyTarget)
     {

@@ -801,4 +801,95 @@ namespace BnetPolicy
     {
         return !(fix && simpleGather);
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Army / expansion defense (2026-11-15 Backrooms 1.1: rear army stuck at a home spider mine, 3rd / 4th lost)
+    // ---------------------------------------------------------------------------------------------
+
+    // home_mine_clear: a known burrowed spider mine near one of our bases is added to the main army detection needs
+    // (upstream needsDetection() is false for mines, so observers never went to them and the mine stayed "known" forever)
+    inline bool homeMineNeedsDetection(bool enabled, bool isSpiderMine, bool burrowed, bool positionValid,
+                                       int distToNearestBasePx, int radiusPx)
+    {
+        return enabled && isSpiderMine && burrowed && positionValid && distToNearestBasePx >= 0
+               && distToNearestBasePx <= radiusPx;
+    }
+
+    // "Near home": within radius of our main or natural (-1 = unknown distance)
+    inline bool clusterNearHome(int distMainPx, int distNaturalPx, int radiusPx)
+    {
+        if (radiusPx <= 0) return false;
+        return (distMainPx >= 0 && distMainPx <= radiusPx) || (distNaturalPx >= 0 && distNaturalPx <= radiusPx);
+    }
+
+    // rear_cluster_unstick_frames: a non-vanguard cluster near home that has been regrouping for N frames with no threat
+    // except spider mines / undetected units is forced to link up with the vanguard. Once triggered it keeps moving for
+    // rearClusterForceFrames so it does not fall back into the regroup state the next frame.
+    inline bool rearClusterUnstick(int unstickFrames, bool isVanguard, bool haveOtherVanguard, bool nearHome,
+                                   int realThreats, bool regrouping, int regroupFrames, bool forcing)
+    {
+        if (unstickFrames <= 0 || isVanguard || !haveOtherVanguard || !nearHome || realThreats > 0) return false;
+        return forcing || (regrouping && regroupFrames >= unstickFrames);
+    }
+
+    inline int rearClusterForceFrames(int unstickFrames)
+    {
+        int frames = unstickFrames / 2;
+        return frames > 120 ? frames : 120;
+    }
+
+    // Upstream keeps regrouping while units joined the cluster in the past 72 frames. Near home that never ends while
+    // production keeps adding units, so the rule is skipped there (rear_cluster_unstick_frames > 0).
+    inline bool skipReinforcementWait(int unstickFrames, bool isVanguard, bool nearHome)
+    {
+        return unstickFrames > 0 && !isVanguard && nearHome;
+    }
+
+    // expansion_select_fix: our own expansion score. Upstream: distEnemy * 3/2 - distUs (+ resources), which on 4-player
+    // maps prefers the far corner (Backrooms 1.1: third at the opposite corner, 0-2 defenders). With the fix the distance
+    // from our bases weighs twice the distance from the enemy and bases beyond maxDistUs go last.
+    inline int expansionScore(bool fix, int distEnemy, int distUs, int minerals, int gas, int maxDistUs)
+    {
+        int score = fix ? distEnemy - distUs * 2 : (distEnemy * 3) / 2 - distUs;
+        score += minerals / 100;
+        score += gas / 50;
+        if (fix && maxDistUs > 0 && distUs > maxDistUs) score -= 100000;
+        return score;
+    }
+
+    // expansion_guard_dragoons: dragoons kept at every 3rd+ base vs mech (not during early bio / rush defense)
+    inline bool expansionGuardActive(bool snipe, int dragoons, bool mechThreat, bool earlyBioOrRush)
+    {
+        return snipe && dragoons > 0 && mechThreat && !earlyBioOrRush;
+    }
+
+    // expansion_defense_redirect: upstream gives up a 3rd+ base when the enemy value there exceeds 5 dragoons. Redirect
+    // the main army instead when the attack is real (>= minEnemyValue) and the army is strong enough (>= ratio x enemy).
+    inline bool defenseRedirectStart(bool enabled, int enemyValue, int armyValue, int minEnemyValue, double ratio)
+    {
+        if (!enabled || enemyValue <= 0 || enemyValue < minEnemyValue) return false;
+        return armyValue >= (int)(ratio * enemyValue + 0.5);
+    }
+
+    // Keep an active redirect while enemies are at the base or were seen there recently, up to maxFrames in total
+    inline bool defenseRedirectKeep(int framesSinceEnemyAtBase, int framesSinceStart, int holdFrames, int maxFrames)
+    {
+        return framesSinceEnemyAtBase < holdFrames && framesSinceStart < maxFrames;
+    }
+
+    // expansion_cannon_at_nexus_start: expansion cannons (and their pylon) are requested once the nexus is placed,
+    // not after it completes (Backrooms 1.1: 4th base cannon started 21 seconds before the base was attacked)
+    inline bool cannonBaseReady(bool depotExists, bool depotCompleted, bool expansion, bool atNexusStart)
+    {
+        if (!depotExists) return false;
+        if (depotCompleted) return true;
+        return expansion && atNexusStart;
+    }
+
+    // cannon_rebuild_backoff_frames: a cannon tile is not re-requested for N frames after a cannon there was lost
+    // (Backrooms 1.1: six build_cancel_dying at the same tile within one second)
+    inline bool cannonTileBackoff(int lostFrame, int frame, int backoffFrames)
+    {
+        return backoffFrames > 0 && lostFrame >= 0 && frame - lostFrame < backoffFrames;
+    }
 }
