@@ -5,6 +5,34 @@
 #include "Map.h"
 #include "PathFinding.h"
 #include "Strategist.h"
+#include "BnetConfig.h"
+#include "BnetLog.h"
+
+namespace
+{
+    // probe_throttle_under_vultures (PvT): while a vulture is at one of our bases, replacement probes would just be killed
+    // again and block army / cannon / observer production (2026-11-15 KnockOut: only probes were produced for 2.5 minutes
+    // while vultures sat in the main), so probes drop below army production. Never below 8 probes.
+    bool throttleProbes()
+    {
+        auto &bnetConfig = BnetConfig::get();
+        if (!bnetConfig.plutoPvtSnipe || !bnetConfig.probeThrottleUnderVultures) return false;
+        if (!BWAPI::Broodwar->enemy() || BWAPI::Broodwar->enemy()->getRace() != BWAPI::Races::Terran) return false;
+        if (Units::countAll(BWAPI::UnitTypes::Protoss_Probe) < 8) return false;
+
+        for (auto &base : Map::getMyBases(BWAPI::Broodwar->self()))
+        {
+            for (const auto &unit : Units::enemyAtBase(base))
+            {
+                if (unit->type == BWAPI::UnitTypes::Terran_Vulture) return true;
+            }
+        }
+        return false;
+    }
+
+    bool throttleLogged = false;
+    int lastThrottleFrame = -1000;
+}
 
 void SaturateBases::addPrioritizedProductionGoals(std::map<int, std::vector<ProductionGoal>> &prioritizedProductionGoals)
 {
@@ -60,6 +88,18 @@ void SaturateBases::addPrioritizedProductionGoals(std::map<int, std::vector<Prod
         }
     }
 
+    int workerPriority = PRIORITY_WORKERS;
+    if (throttleProbes())
+    {
+        workerPriority = PRIORITY_NORMAL;
+        if (!throttleLogged || currentFrame - lastThrottleFrame > 24 * 60)
+        {
+            BnetLog::event("probe_throttle vultures_at_base=1");
+            throttleLogged = true;
+        }
+        lastThrottleFrame = currentFrame;
+    }
+
     // Now order the production
     for (auto &clusterAndRequiredWorkers : baseClusters)
     {
@@ -79,7 +119,7 @@ void SaturateBases::addPrioritizedProductionGoals(std::map<int, std::vector<Prod
             if (!base->resourceDepot) continue;
             if (!base->resourceDepot->completed) continue;
 
-            prioritizedProductionGoals[PRIORITY_WORKERS].emplace_back(std::in_place_type<UnitProductionGoal>,
+            prioritizedProductionGoals[workerPriority].emplace_back(std::in_place_type<UnitProductionGoal>,
                                                                       label,
                                                                       BWAPI::UnitTypes::Protoss_Probe,
                                                                       count,

@@ -229,6 +229,41 @@ Log counters (`[APM]` / `[END]`): `attack_commit_holds`, `regroup_commit_holds`,
 Not verified: the real Battle.net latency as seen by Stardust (no in-game measurement; the 5-6 frames come from the
 Pluto bridge), Windows build, and any effect on win rate. Not changed: combat sim, targeting, unit types, build orders.
 
+## PvT vs. vulture drops and spider mines (2026-11-15 KnockOut replay)
+
+Loss on KnockOut 1.4 (`bnet-pluto@f95e2600`). Terran 1-1-1: factory 2:27, starport 3:33, control tower 4:25, dropship
+4:50, vulture drop into our main mineral line about 5:40, spider mines in the main / ramp from 6:02, then tanks. The
+recognizer stayed `Normal` (MidGameMech only by the frame-8000 timer) and the army was walking to the enemy natural.
+`WorkerDefenseSquad` made probes chase vultures (about 1,700 attack orders in 40 s); supply fell from 39 to 20. Forge
+5:43, first cannon 6:14, observatory 5:46 but the observer only started at 8:49: between frames 9000 and 12386 only probes
+were produced (probes at PRIORITY_WORKERS 20 replaced dead ones ahead of everything else). Separately, 5,307 move orders
+went to (4095,4095) (clamped `Positions::Invalid`) over 47 units, 3,737 of them to one probe.
+
+All keys apply vs. Terran with `pluto_pvt_snipe` on (except `invalid_move_guard`, all matchups).
+
+| Key | Default | Description |
+|---|---|---|
+| `invalid_move_guard` | `true` | `MyUnitImpl::move` rejects invalid positions; after an unstick the move is only reissued when `currentlyMovingTowards` is valid (it is not set during a mineral walk). Counter `invalid_moves`, first 3 and every 500th as `[EVENT] invalid_move unit=..`. |
+| `worker_flee_vultures` / `worker_flee_margin_px` / `worker_flee_hold_frames` | `true` / `96` / `48` | A worker within a vulture's range + margin, at a base without a completed powered mineral-line cannon, moves to the other early base (main <-> natural, completed nexus, no enemies) instead of attacking; otherwise away from the vulture (4-tile grid), otherwise mineral walks to the farthest patch. Keeps fleeing for the hold frames after the last threat. With a cannon the upstream behavior applies. Counter `worker_flees`. |
+| `probe_throttle_under_vultures` | `true` | While a vulture is at any of our bases and we have 8+ probes, probe production drops from PRIORITY_WORKERS (20) to PRIORITY_NORMAL (80), below dragoons, cannons and observers. `[EVENT] probe_throttle` once per episode. |
+| `blind_main_cannon_frame` | `6000` | From this frame (about 4:10) the main mineral line gets its `main_cannons` cannon (first one urgent, PRIORITY_BASEDEFENSE, forge as prerequisite) even without a seen mech threat, unless early bio / a rush was recognized (MarineRush, BunkerContain, ProxyRush, WorkerRush, MarinePressure, AntiMarineRush). A drop risk also triggers it. `0` = off. `[EVENT] blind_main_cannon` once. |
+| `home_guard_dragoons` / `home_guard_until_frame` | `1` / `14000` | While the main army is attacking and no observer is out, a DefendBase play keeps about this many units at the main (enemy value floor passed to `updateDefendBasePlays`). Not vs. early bio. `[EVENT] home_guard start|end`. In the early game (before frame 10000) only units already near the main are taken, so usually the next produced dragoon. Also: vs. vultures at the main / natural, DefendBase additionally takes dragoons outside the vanguard cluster. |
+| `observer_emergency_priority` | `true` | First observer: Urgent (mine seen) -> PRIORITY_EMERGENCY (10); Elevated with the observatory done -> EMERGENCY, otherwise SPECIALTEAMS; Preventive / waiting with the robotics facility done -> SPECIALTEAMS. Drop risk counts as Elevated. The control tower / cloak check now runs after this policy. `false` = previous mapping. |
+| `mine_hold_until_observer` / `mine_hold_max_frame` | `true` / `12000` | After a spider mine is seen or researched, the main army defends the main until the first observer is complete (at most until the frame). `[EVENT] mine_hold start|end`. |
+| `pluto_rescout_frame` / `pluto_rescout_max_frames` | `4800` / `1440` | A second probe scout (play `PlutoRescout`) at about 3:20 visits the enemy main and natural and returns to mining; gives up at 20 hp+shields, on death or after the max frames. Skipped vs. early bio. `[EVENT] rescout_start`, `rescout_end reason=.. factories=.. starport=.. control_tower=..`. `0` = off. |
+| `drop_risk_detection` | `true` | Starport, control tower or dropship seen before frame 12000 latches a drop risk: main cannon (urgent), observer Elevated. `[EVENT] drop_risk` once. |
+| `midgame_strategy_hold_frames` | `480` | A switch between MidGameMech / MidGameBio / MidGameBioMech is only accepted once the current enemy strategy has been held this long (20 s). Switches into the mid game are not delayed. `[EVENT] midgame_switch_held` on the first suppression. `0` = off. |
+
+Crash diagnostics: game start writes `bwapi-data/write/stardust_bnet.running` and `[END]` removes it. If the file exists at
+the next start, `[EVENT] previous_game_unfinished build=.. started=.. map=..` is logged (crash, forced close or bridge
+disconnect). For a crash, check Windows Event Viewer > Windows Logs > Application around that time (faulting module
+`Stardust.dll` or `StarCraft.exe`). No crash handler or dump writer was added.
+
+Not verified: Windows build, in-game behavior and win rate. The flee destination and home guard depend on upstream
+DefendBase / squad scheduling (a DefendBase play exists only while the main army is attacking, and not when the main army
+is already near the base). The re-scout probe can die and costs mining time. No new enemy strategy enum was added (drop
+risk is a PvT flag).
+
 ## PvZ vs. zergling all-ins (2026-11-15 Radeon replay)
 
 Loss in 6:15 to a human 12 pool -> hatchery -> speedling all-in (pool 1:17, speed 3:38, about 24 zergling morphs). The
@@ -310,5 +345,6 @@ below probe production. Army at the end: 2 zealots, 1 dragoon; 27 of 30 trained 
 - `res_*`: cumulative counts (since game start) of resource commands (gather / return cargo / resource right-click) for workers in simple gather mode only, i.e. where the Battle.net guards apply. `res_attempts` = calls reaching the guard; `res_issued` = commands BWAPI accepted; `res_blocked_interval` = same command to the same target within `min_command_interval_frames`; `res_blocked_already` = already moving to / waiting at / mining the target, or already returning cargo; `res_blocked_budget` = `max_orders_per_frame` exhausted. Attempts that BWAPI itself rejects are counted in `res_attempts` only. Optimized-mining workers and recovery commands are not counted here.
 - `stuck_*`: cumulative stuck-worker recovery counts: `stuck_attempts` (recoveries started), `stuck_reassign` (successful reassignment to a different patch), `stuck_cmd_ok` / `stuck_cmd_failed` (recovery gather accepted / rejected by BWAPI), `stuck_budget_deferred` (postponed because the per-frame budget was exhausted).
 - `bio_to_attack` / `bio_to_regroup`: cumulative attack <-> regroup transitions of attack-base squads, counted only while the MidGameBio scales are active (Terran opponent recognized as `MidGameBio` with `pluto_pvt_snipe` on). Repeated decisions in the same state are not counted.
+- `invalid_moves` / `worker_flees`: moves rejected by `invalid_move_guard` and workers that started fleeing a vulture. `[EVENT] previous_game_unfinished`: the previous game never wrote `[END]`.
 - `[EVENT] detection_stage`: the first-observer request stage changed; the line lists the inputs that drove the decision. `first_observer_complete` is written once, on the first frame a completed observer exists (PvT only). `cannon_issue` is written once per distinct cannon placement problem. `opponent_left` and `surrender` are unchanged.
 - The log compiles with `TOURNAMENT_BUILD=ON` (CMake `BNET_LOG`, default `ON`) and can be turned off at runtime with `bnet_log`. The counters are kept even when the log is disabled, but are not written anywhere.

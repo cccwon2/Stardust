@@ -121,7 +121,9 @@ protected:
 
     static void scoutExpos(std::vector<std::shared_ptr<Play>> &plays, int startingFrame);
 
-    static void updateDefendBasePlays(std::vector<std::shared_ptr<Play>> &plays);
+    // mainHomeGuardValue (Battle.net home guard): minimum enemy value used for our main while the main army is attacking,
+    // so a DefendBase play keeps a few units at home even when no enemy is there yet. 0 = upstream behavior.
+    static void updateDefendBasePlays(std::vector<std::shared_ptr<Play>> &plays, int mainHomeGuardValue = 0);
 
     static void updateAttackPlays(std::vector<std::shared_ptr<Play>> &plays, bool defendOurMain);
 

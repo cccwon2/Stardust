@@ -435,7 +435,7 @@ void StrategyEngine::mainArmyProduction(std::map<int, std::vector<ProductionGoal
     }
 }
 
-void StrategyEngine::updateDefendBasePlays(std::vector<std::shared_ptr<Play>> &plays)
+void StrategyEngine::updateDefendBasePlays(std::vector<std::shared_ptr<Play>> &plays, int mainHomeGuardValue)
 {
     auto mainArmyPlay = getPlay<MainArmyPlay>(plays);
 
@@ -481,6 +481,12 @@ void StrategyEngine::updateDefendBasePlays(std::vector<std::shared_ptr<Play>> &p
             if (!isMainOrNaturalInEarlyGame && enemyValue > 5 * CombatSim::unitValue(BWAPI::UnitTypes::Protoss_Dragoon))
             {
                 continue;
+            }
+
+            // Home guard: keep a few units at our main even without enemies there (vulture drops in Pluto's 1-1-1)
+            if (base == Map::getMyMain() && mainHomeGuardValue > enemyValue)
+            {
+                enemyValue = mainHomeGuardValue;
             }
 
             basesToDefend[base] = enemyValue;

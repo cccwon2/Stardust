@@ -4,6 +4,9 @@
 #include "Geo.h"
 #include "BuildingPlacement.h"
 #include "Units.h"
+#include "Map.h"
+#include "BnetConfig.h"
+#include "BnetLog.h"
 
 #include "DebugFlag_UnitOrders.h"
 
@@ -22,14 +25,20 @@ std::vector<std::pair<MyWorker, Unit>> WorkerDefenseSquad::selectTargets(std::se
         }
     }
 
-    auto selectTarget = [&enemyUnits, &hasCannonInMineralLine](MyWorker &worker)
+    bool vultureFlee = vultureFleeActive(hasCannonInMineralLine);
+    int fleeMargin = BnetConfig::get().workerFleeMarginPx;
+    fleeHold.clear();
+
+    auto selectTarget = [&enemyUnits, &hasCannonInMineralLine, vultureFlee, fleeMargin](MyWorker &worker)
     {
         Unit closestEnemy = nullptr;
         int closestEnemyDist = INT_MAX;
         for (auto &enemy : enemyUnits)
         {
             if (!worker->canAttack(enemy)) continue;
-            if (!worker->isInEnemyWeaponRange(enemy, hasCannonInMineralLine ? 0 : 48)) continue;
+            int buffer = hasCannonInMineralLine ? 0 : 48;
+            if (vultureFlee && enemy->type == BWAPI::UnitTypes::Terran_Vulture) buffer = std::max(buffer, fleeMargin);
+            if (!worker->isInEnemyWeaponRange(enemy, buffer)) continue;
 
             int dist = worker->getDistance(enemy);
             if (dist < closestEnemyDist)
@@ -50,11 +59,25 @@ std::vector<std::pair<MyWorker, Unit>> WorkerDefenseSquad::selectTargets(std::se
         // Dead units
         if (!worker->exists())
         {
+            fleeUntil.erase(worker->id);
             it = units.erase(it);
             continue;
         }
 
         auto target = selectTarget(worker);
+
+        // Fleeing workers keep running for worker_flee_hold_frames after the last threat
+        if (!target)
+        {
+            auto fleeIt = fleeUntil.find(worker->id);
+            if (fleeIt != fleeUntil.end() && fleeIt->second > currentFrame)
+            {
+                fleeHold.push_back(worker);
+                it++;
+                continue;
+            }
+            if (fleeIt != fleeUntil.end()) fleeUntil.erase(fleeIt);
+        }
 
         // Units not being threatened
         if (!target)
@@ -112,6 +135,23 @@ void WorkerDefenseSquad::execute(std::vector<std::pair<MyWorker, Unit>> &workers
         auto &target = workerAndTarget.second;
 
         if (!worker->exists()) continue;
+
+        // worker_flee_vultures: run instead of fighting a vulture we cannot kill without a cannon
+        if (target->type == BWAPI::UnitTypes::Terran_Vulture && vultureFleeActive(false))
+        {
+            bool hasCannon = false;
+            auto &defenseLocations = BuildingPlacement::baseStaticDefenseLocations(base);
+            if (defenseLocations.isValid())
+            {
+                auto cannon = Units::myBuildingAt(*defenseLocations.workerDefenseCannons.begin());
+                hasCannon = cannon && cannon->completed && cannon->bwapiUnit->isPowered();
+            }
+            if (!hasCannon)
+            {
+                flee(worker, target);
+                continue;
+            }
+        }
 
         // Select a mineral patch to use
         // We pick the patch that is furthest away, but closer to us than the enemy
@@ -211,6 +251,92 @@ void WorkerDefenseSquad::execute(std::vector<std::pair<MyWorker, Unit>> &workers
         worker->attack(target->bwapiUnit, true);
         //worker->attackUnit(target, workersAndTargets, false);
     }
+
+    // Workers still in their flee hold time keep moving to the safe base; without one they keep their last order
+    for (auto &worker : fleeHold)
+    {
+        if (!worker->exists()) continue;
+        for (auto other : {Map::getMyMain(), Map::getMyNatural()})
+        {
+            if (!other || other == base || other->owner != BWAPI::Broodwar->self()) continue;
+            if (!other->resourceDepot || !other->resourceDepot->completed || !Units::enemyAtBase(other).empty()) continue;
+            worker->moveTo(other->getPosition());
+            break;
+        }
+    }
+}
+
+bool WorkerDefenseSquad::vultureFleeActive(bool hasCannonInMineralLine) const
+{
+    if (hasCannonInMineralLine) return false;
+    auto &bnetConfig = BnetConfig::get();
+    if (!bnetConfig.plutoPvtSnipe || !bnetConfig.workerFleeVultures) return false;
+    return BWAPI::Broodwar->enemy() && BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Terran;
+}
+
+BWAPI::Position WorkerDefenseSquad::fleeDestination(const MyWorker &worker, const Unit &threat) const
+{
+    // Prefer the other early base (main <-> natural) if it has a completed nexus and no enemy units
+    for (auto other : {Map::getMyMain(), Map::getMyNatural()})
+    {
+        if (!other || other == base) continue;
+        if (other->owner != BWAPI::Broodwar->self()) continue;
+        if (!other->resourceDepot || !other->resourceDepot->completed) continue;
+        if (!Units::enemyAtBase(other).empty()) continue;
+        return other->getPosition();
+    }
+
+    // Otherwise run directly away from the vulture, quantized to a 4-tile grid so the target does not change every frame
+    auto delta = worker->lastPosition - threat->lastPosition;
+    double length = std::sqrt(double(delta.x) * delta.x + double(delta.y) * delta.y);
+    if (length < 1.0) delta = worker->lastPosition - base->getPosition(), length = std::sqrt(double(delta.x) * delta.x + double(delta.y) * delta.y);
+    if (length >= 1.0)
+    {
+        BWAPI::Position away(worker->lastPosition.x + (int)(delta.x * 256.0 / length),
+                             worker->lastPosition.y + (int)(delta.y * 256.0 / length));
+        away = BWAPI::Position(((away.x / 128) * 128) + 64, ((away.y / 128) * 128) + 64);
+        if (away.isValid() && BWAPI::Broodwar->isWalkable(BWAPI::WalkPosition(away))) return away;
+    }
+
+    return BWAPI::Positions::Invalid;
+}
+
+void WorkerDefenseSquad::flee(const MyWorker &worker, const Unit &threat)
+{
+    int hold = BnetConfig::get().workerFleeHoldFrames;
+    auto it = fleeUntil.find(worker->id);
+    if (it == fleeUntil.end() || it->second < currentFrame) BnetLog::workerFlee();
+    fleeUntil[worker->id] = currentFrame + std::max(1, hold);
+
+    auto dest = threat ? fleeDestination(worker, threat) : BWAPI::Positions::Invalid;
+    if (!dest.isValid())
+    {
+        // Mineral walk to the patch furthest from the threat (workers pass through each other while gathering)
+        BWAPI::Unit furthestPatch = nullptr;
+        int furthestDist = -1;
+        for (const auto &mineralPatch : base->mineralPatches())
+        {
+            auto patch = mineralPatch->getBwapiUnitIfVisible();
+            if (!patch) continue;
+            int dist = threat ? threat->lastPosition.getApproxDistance(patch->getPosition()) : 0;
+            if (dist > furthestDist)
+            {
+                furthestPatch = patch;
+                furthestDist = dist;
+            }
+        }
+        if (furthestPatch)
+        {
+            worker->gather(furthestPatch);
+            return;
+        }
+        dest = base->getPosition();
+    }
+
+#if DEBUG_UNIT_ORDERS
+    CherryVis::log(worker->id) << "Fleeing vulture to " << BWAPI::WalkPosition(dest);
+#endif
+    worker->moveTo(dest);
 }
 
 void WorkerDefenseSquad::disband()
@@ -222,4 +348,6 @@ void WorkerDefenseSquad::disband()
     }
 
     units.clear();
+    fleeUntil.clear();
+    fleeHold.clear();
 }

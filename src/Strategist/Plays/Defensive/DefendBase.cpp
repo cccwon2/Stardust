@@ -1,4 +1,5 @@
 #include "DefendBase.h"
+#include "BnetConfig.h"
 
 #include "Strategist.h"
 #include "General.h"
@@ -147,6 +148,28 @@ void DefendBase::update()
                                                  BWAPI::UnitTypes::Protoss_Zealot,
                                                  base->getPosition(),
                                                  false);
+        }
+
+        // Pluto snipe: zealots cannot catch vultures, so vs. a vulture runby / drop also take dragoons that are not in the
+        // vanguard cluster (upstream only takes dragoons that are already close to the base)
+        if (requestedUnits > 0 && BnetConfig::get().plutoPvtSnipe)
+        {
+            bool vulturePresent = false;
+            for (const auto &unit : squad->enemyUnits)
+            {
+                if (unit->type == BWAPI::UnitTypes::Terran_Vulture)
+                {
+                    vulturePresent = true;
+                    break;
+                }
+            }
+            if (vulturePresent)
+            {
+                status.unitRequirements.emplace_back(requestedUnits,
+                                                     BWAPI::UnitTypes::Protoss_Dragoon,
+                                                     base->getPosition(),
+                                                     false);
+            }
         }
 
         return;

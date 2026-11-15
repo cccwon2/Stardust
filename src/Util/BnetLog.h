@@ -86,6 +86,13 @@ namespace BnetLog
     // Dragoon stop orders sent to unstick a dragoon whose attack was cancelled (upstream MyDragoon::unstick)
     void dragoonUnstick();
 
+    // Move orders rejected because the target position was invalid (invalid_move_guard). The first few and then every
+    // 500th are also written as [EVENT] invalid_move lines with the unit type.
+    void invalidMove(const std::string &unitType);
+
+    // Workers sent away from a vulture instead of attacking it (worker_flee_vultures)
+    void workerFlee();
+
     // PvT mech expansion gate state change (logged as an [EVENT] line only when the state changes)
     void mechExpandGate(bool blocked, int bases, int armyUnits, int required);
 }

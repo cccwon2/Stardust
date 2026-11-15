@@ -87,6 +87,26 @@ private:
     // Battle.net summary log: whether first_observer_complete was written
     bool plutoFirstObserverLogged = false;
 
+    // Pluto snipe: starport / control tower / dropship seen early (drop_risk_detection), latched once seen
+    bool plutoDropRisk = false;
+
+    // Pluto snipe: army held at home after a spider mine until the first observer (mine_hold_until_observer)
+    bool plutoMineHold = false;
+
+    // Pluto snipe: home guard dragoons at the main until the first observer (home_guard_dragoons), for logging
+    bool plutoHomeGuard = false;
+
+    // Pluto snipe: second worker scout (pluto_rescout_frame) already added
+    bool plutoRescoutAdded = false;
+
+    // Pluto snipe: main cannon requested by the blind timing (blind_main_cannon_frame), for logging
+    bool plutoBlindMainCannonLogged = false;
+
+    // Pluto snipe: mid-game strategy switches suppressed by midgame_strategy_hold_frames (logged once per pair)
+    int plutoMidgameHolds = 0;
+
+    void updatePlutoSignals(std::vector<std::shared_ptr<Play>> &plays);
+
     TerranStrategy recognizeEnemyStrategy();
 
     OurStrategy chooseOurStrategy(TerranStrategy newEnemyStrategy, std::vector<std::shared_ptr<Play>> &plays);

@@ -61,6 +61,14 @@ void MyUnitImpl::move(BWAPI::Position position, bool force)
         return;
     }
 
+    // invalid_move_guard: upstream could reissue a move to Positions::Invalid (e.g. after an unstick during a mineral walk),
+    // which BWAPI clamps to the bottom-right map corner (4095,4095). The 2026-11-15 KnockOut log had 5,307 such moves.
+    if (BnetConfig::get().invalidMoveGuard && !position.isValid())
+    {
+        BnetLog::invalidMove(type.getName());
+        return;
+    }
+
     auto skipMoveCommand = [&]()
     {
         if (force) return false;
