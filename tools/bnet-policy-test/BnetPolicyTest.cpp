@@ -473,6 +473,21 @@ namespace
         CHECK(pvzNextGasTech(true, 150, true, true, false, true, true, true, true, true, true, true, false) == PvzGasTech::HighTemplar);
         CHECK(pvzNextGasTech(true, 500, true, true, false, true, true, true, true, true, true, true, true) == PvzGasTech::None);
 
+        // Hydras not seen: assume mutalisks. Stargate stays ahead of the citadel, main cannons are requested,
+        // and corsairs are built toward the same cap as a seen mutalisk plan.
+        CHECK(pvzAssumeMutalisks(false, false));
+        CHECK(pvzAssumeMutalisks(false, true));
+        CHECK(pvzAssumeMutalisks(true, true));
+        CHECK(!pvzAssumeMutalisks(true, false));
+        CHECK(pvzAssumedMutaMainCannons(false, false) == 3);
+        CHECK(pvzAssumedMutaMainCannons(true, true) == 3);
+        CHECK(pvzAssumedMutaMainCannons(true, false) == 0);
+        CHECK(pvzAssumedMutaCorsairTarget(false, false, 0) == 7);
+        CHECK(pvzAssumedMutaCorsairTarget(false, true, 4) == 9);
+        CHECK(pvzAssumedMutaCorsairTarget(true, false, 10) == 0);
+        CHECK(pvzNextGasTech(true, 150, true, true, false, false, false, false) == PvzGasTech::Stargate);
+        CHECK(pvzNextGasTech(true, 100, true, true, true, false, false, false) == PvzGasTech::Citadel);
+
         // 2-3 dragoons do not walk into more hydras. A zealot+dragoon mix attacks only when it is large enough.
         CHECK(!pvzTakeHydraFight(0, 2, 0, 8));
         CHECK(!pvzTakeHydraFight(0, 3, 0, 4));

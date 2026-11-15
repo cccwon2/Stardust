@@ -9,6 +9,9 @@
 #include "BnetConfig.h"
 #include "BnetLog.h"
 #include "BnetPolicy.h"
+#include "BuildingPlacement.h"
+#include "Builder.h"
+#include "UnitUtil.h"
 
 #include <sstream>
 
@@ -193,13 +196,89 @@ namespace
         }
     }
 
+    bool enemyHasHydra()
+    {
+        return Units::hasEnemyBuilt(BWAPI::UnitTypes::Zerg_Hydralisk_Den)
+               || Units::countEnemy(BWAPI::UnitTypes::Zerg_Hydralisk) > 0;
+    }
+
+    bool enemyHasMuta()
+    {
+        return Units::hasEnemyBuilt(BWAPI::UnitTypes::Zerg_Spire)
+               || Units::countEnemy(BWAPI::UnitTypes::Zerg_Mutalisk) > 0;
+    }
+
     bool enemyHydraNotMuta()
     {
-        bool hydra = Units::hasEnemyBuilt(BWAPI::UnitTypes::Zerg_Hydralisk_Den)
-                     || Units::countEnemy(BWAPI::UnitTypes::Zerg_Hydralisk) > 0;
-        bool muta = Units::hasEnemyBuilt(BWAPI::UnitTypes::Zerg_Spire)
-                    || Units::countEnemy(BWAPI::UnitTypes::Zerg_Mutalisk) > 0;
-        return BnetPolicy::pvzHydraNotMuta(hydra, muta);
+        return BnetPolicy::pvzHydraNotMuta(enemyHasHydra(), enemyHasMuta());
+    }
+
+    // Main mineral cannons while mutalisks are the plan, one probe at a time.
+    // ForgeFastExpand only did this after the enemy strategy became MutaRush, and DefendBase
+    // does not run while that play is still defending the wall. A photon cannon's required
+    // building is the forge, so the producer adds a forge when this opening does not have one.
+    void requestAssumedMutaMainCannons(std::map<int, std::vector<ProductionGoal>> &prioritizedProductionGoals)
+    {
+        if (!BnetConfig::get().pvzAntiAllinFix) return;
+        if (BWAPI::Broodwar->enemy()->getRace() != BWAPI::Races::Zerg) return;
+
+        int target = BnetPolicy::pvzAssumedMutaMainCannons(enemyHasHydra(), enemyHasMuta());
+        if (target <= 0) return;
+
+        auto main = Map::getMyMain();
+        if (!main) return;
+        auto &locations = BuildingPlacement::baseStaticDefenseLocations(main);
+        if (!locations.isValid()) return;
+
+        int existing = 0;
+        bool unstarted = false;
+        BWAPI::TilePosition next = BWAPI::TilePositions::Invalid;
+        for (const auto &tile : locations.workerDefenseCannons)
+        {
+            auto building = Units::myBuildingAt(tile);
+            if (building && building->type == BWAPI::UnitTypes::Protoss_Photon_Cannon)
+            {
+                existing++;
+                continue;
+            }
+            auto pending = Builder::pendingHere(tile);
+            if (pending)
+            {
+                existing++;
+                if (!pending->isConstructionStarted()) unstarted = true;
+                continue;
+            }
+            if (!next.isValid()) next = tile;
+        }
+        if (unstarted || existing >= target || !next.isValid()) return;
+
+        auto buildAt = [&](BWAPI::TilePosition tile, BWAPI::UnitType type, int framesUntilPowered)
+        {
+            auto buildLocation = BuildingPlacement::BuildLocation(
+                    Block::Location(tile),
+                    BuildingPlacement::builderFrames(main->getPosition(), tile, type),
+                    framesUntilPowered,
+                    0);
+            prioritizedProductionGoals[PRIORITY_DEPOTS].emplace_back(std::in_place_type<UnitProductionGoal>,
+                                                                     "pvz-muta",
+                                                                     type,
+                                                                     buildLocation,
+                                                                     currentFrame);
+        };
+
+        int framesUntilPowered = 0;
+        auto pylon = Units::myBuildingAt(locations.powerPylon);
+        if (!pylon && !Builder::isPendingHere(locations.powerPylon))
+        {
+            buildAt(locations.powerPylon, BWAPI::UnitTypes::Protoss_Pylon, 0);
+        }
+        if (!pylon || !pylon->completed)
+        {
+            framesUntilPowered = Builder::framesUntilCompleted(
+                    locations.powerPylon,
+                    UnitUtil::BuildTime(BWAPI::UnitTypes::Protoss_Pylon) + 240);
+        }
+        buildAt(next, BWAPI::UnitTypes::Protoss_Photon_Cannon, framesUntilPowered);
     }
 }
 
@@ -754,7 +833,8 @@ void PvZ::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
                 upgrade(prioritizedProductionGoals, BWAPI::UpgradeTypes::Protoss_Ground_Weapons, 1, PRIORITY_NORMAL);
                 upgrade(prioritizedProductionGoals, BWAPI::UpgradeTypes::Protoss_Air_Weapons, 1, PRIORITY_NORMAL);
             }
-            if (!isEnemyMutaBuild)
+            // Zealot speed pulls a citadel. That stays on the confirmed-hydra plan.
+            if (enemyHydraNotMuta())
             {
                 upgrade(prioritizedProductionGoals, BWAPI::UpgradeTypes::Leg_Enhancements, 1, PRIORITY_NORMAL);
             }
@@ -843,8 +923,12 @@ void PvZ::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
             // Upgrade +1 attack at 2 zealots
             upgradeAtCount(prioritizedProductionGoals, BWAPI::UpgradeTypes::Protoss_Ground_Weapons, BWAPI::UnitTypes::Protoss_Zealot, 2);
 
-            // Upgrade leg speed at 5 zealots
-            upgradeAtCount(prioritizedProductionGoals, BWAPI::UpgradeTypes::Leg_Enhancements, BWAPI::UnitTypes::Protoss_Zealot, 5);
+            // Leg speed at 5 zealots inserts the upgrade into the zealot goal, and the producer builds
+            // the citadel as its prerequisite ahead of the stargate. Only when hydras are confirmed.
+            if (enemyHydraNotMuta())
+            {
+                upgradeAtCount(prioritizedProductionGoals, BWAPI::UpgradeTypes::Leg_Enhancements, BWAPI::UnitTypes::Protoss_Zealot, 5);
+            }
 
             break;
         }
@@ -936,9 +1020,11 @@ void PvZ::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
                     + Units::countEnemy(BWAPI::UnitTypes::Zerg_Lurker)
                     + Units::countEnemy(BWAPI::UnitTypes::Zerg_Mutalisk);
 
-            // Simulate future units if we've seen tech
+            // Simulate future units if we've seen tech. Hydras not seen: count the assumed mutalisks
+            // the same way a seen spire is counted, so the mix does not stay on lings.
             if (enemyHydras == 0 && Units::countEnemy(BWAPI::UnitTypes::Zerg_Hydralisk_Den) > 0) enemyHydras = 3;
             if (enemyMutas == 0 && Units::countEnemy(BWAPI::UnitTypes::Zerg_Spire) > 0) enemyMutas = 3;
+            if (enemyMutas == 0 && BnetPolicy::pvzAssumeMutalisks(enemyHasHydra(), enemyHasMuta())) enemyMutas = 3;
 
             // Compute the enemy ling percentage, weighted to count mutas a bit higher
             double enemyLingPercentage = 1.0;
@@ -992,13 +1078,28 @@ void PvZ::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
         }
     }
 
-    // FFE and the early midgame were floating gas (500 by 6:00, 858 by 8:00) while the cybernetics core,
-    // dragoon range, stargate, citadel and templar archives were missing. Queue the next one of those.
+    // Floating gas used to sit on the core, dragoon range, stargate, citadel and archives.
     // Against confirmed hydras the next item is the citadel, then leg speed, archives, storm, and templars.
-    if (isFFE() || ourStrategy == OurStrategy::MidGame)
+    // Otherwise the stargate comes before the citadel. Every opening, not only forge fast expand:
+    // a wall that cannot be walked still has to cover the assumed mutalisks.
+    spendSurplusGas(prioritizedProductionGoals);
+
+    // Corsairs once that stargate exists. One at a time, ahead of the zealot/dragoon line.
     {
-        spendSurplusGas(prioritizedProductionGoals);
+        int target = BnetPolicy::pvzAssumedMutaCorsairTarget(enemyHasHydra(), enemyHasMuta(),
+                                                             Units::countEnemy(BWAPI::UnitTypes::Zerg_Mutalisk));
+        int have = Units::countAll(BWAPI::UnitTypes::Protoss_Corsair);
+        if (target > have && Units::countAll(BWAPI::UnitTypes::Protoss_Stargate) > 0)
+        {
+            prioritizedProductionGoals[PRIORITY_SPECIALTEAMS].emplace_back(std::in_place_type<UnitProductionGoal>,
+                                                                           "pvz-muta",
+                                                                           BWAPI::UnitTypes::Protoss_Corsair,
+                                                                           1,
+                                                                           1);
+        }
     }
+
+    requestAssumedMutaMainCannons(prioritizedProductionGoals);
 
     if (enemyHydraNotMuta()
         && (BWAPI::Broodwar->self()->hasResearched(BWAPI::TechTypes::Psionic_Storm)
@@ -1123,8 +1224,12 @@ void PvZ::handleNaturalExpansion(std::vector<std::shared_ptr<Play>> &plays,
 
 void PvZ::handleUpgrades(std::map<int, std::vector<ProductionGoal>> &prioritizedProductionGoals)
 {
-    // Basic infantry skill upgrades are queued when we have enough of them and are still building them
-    upgradeAtCount(prioritizedProductionGoals, BWAPI::UpgradeTypes::Leg_Enhancements, BWAPI::UnitTypes::Protoss_Zealot, 5);
+    // Basic infantry skill upgrades are queued when we have enough of them and are still building them.
+    // Zealot speed is the confirmed-hydra plan. It is what builds the citadel ahead of a stargate.
+    if (enemyHydraNotMuta())
+    {
+        upgradeAtCount(prioritizedProductionGoals, BWAPI::UpgradeTypes::Leg_Enhancements, BWAPI::UnitTypes::Protoss_Zealot, 5);
+    }
     upgradeAtCount(prioritizedProductionGoals, BWAPI::UpgradeTypes::Singularity_Charge, BWAPI::UnitTypes::Protoss_Dragoon, 2);
 
     // Cases where we want the upgrade as soon as we start building one of the units
