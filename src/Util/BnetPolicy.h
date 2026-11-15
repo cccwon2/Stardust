@@ -555,6 +555,30 @@ namespace BnetPolicy
         return hydraConfirmed && !mutaConfirmed;
     }
 
+    // Hydralisks not seen: assume mutalisks, on every map. A seen spire or mutalisk is the same plan.
+    // The citadel-then-zealot-speed order stays only on pvzHydraNotMuta.
+    inline bool pvzAssumeMutalisks(bool hydraConfirmed, bool mutaConfirmed)
+    {
+        return !pvzHydraNotMuta(hydraConfirmed, mutaConfirmed);
+    }
+
+    // Main mineral cannons while mutalisks are the plan. 3 is the count ForgeFastExpand already
+    // requests once a muta rush is recognized. Confirmed hydras, with no mutalisk, stay at 0.
+    inline int pvzAssumedMutaMainCannons(bool hydraConfirmed, bool mutaConfirmed)
+    {
+        if (!pvzAssumeMutalisks(hydraConfirmed, mutaConfirmed)) return 0;
+        return 3;
+    }
+
+    // Corsairs to have while mutalisks are the plan, including before one is seen.
+    // 7, plus one per two seen mutalisks, is the cap already used by PvZ::desiredCorsairs.
+    inline int pvzAssumedMutaCorsairTarget(bool hydraConfirmed, bool mutaConfirmed, int mutasSeen)
+    {
+        if (!pvzAssumeMutalisks(hydraConfirmed, mutaConfirmed)) return 0;
+        if (mutasSeen < 0) mutasSeen = 0;
+        return 7 + mutasSeen / 2;
+    }
+
     // Mineral-line cannons around a nexus. Off for a confirmed hydra attack that is not mutalisks.
     inline bool pvzNexusCannons(bool hydraConfirmed, bool mutaConfirmed)
     {
