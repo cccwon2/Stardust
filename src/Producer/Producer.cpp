@@ -7,6 +7,8 @@
 #include "Builder.h"
 #include "BuildingPlacement.h"
 #include "Workers.h"
+#include "Map.h"
+#include "BnetLog.h"
 #include "UnitUtil.h"
 #include "WorkerGatherOptimizer.h"
 
@@ -690,7 +692,6 @@ namespace Producer
             auto neighbourhood = fixedNeighbourhood ? *fixedNeighbourhood : BuildingPlacement::Neighbourhood::AllMyBases;
 
             auto &pylonLocations = buildLocations[to_underlying(neighbourhood)][2];
-            if (pylonLocations.empty()) return false;
 
             // All else being equal, try to keep two of each location type powered
             int desiredMedium = std::max(0, 2 - (int) buildLocations[to_underlying(neighbourhood)][3].size());
@@ -738,14 +739,43 @@ namespace Producer
                 return true;
             }
 
-            // We couldn't satisfy our hard requirement, so just return the first one
-            pylon.estimatedWorkerMovementTime = pylonLocations.begin()->builderFrames;
-            if (!tentative)
+            // The hard requirement was not met. Keep the first registered tile a probe can
+            // walk to. That is the previous fallback when that tile is reachable, so a main
+            // that already builds is unchanged.
+            for (auto it = pylonLocations.begin(); it != pylonLocations.end(); it++)
             {
-                pylon.buildLocation = *pylonLocations.begin();
-                pylonLocations.erase(pylonLocations.begin());
+                if (!BuildingPlacement::workerCanReach(it->location.tile, BWAPI::UnitTypes::Protoss_Pylon))
+                    continue;
+
+                pylon.estimatedWorkerMovementTime = it->builderFrames;
+                if (!tentative)
+                {
+                    pylon.buildLocation = *it;
+                    pylonLocations.erase(it);
+                }
+                return false;
             }
-            return false;
+
+            // Every registered tile fails the same reach check as the wall pylon. Assigning
+            // pylonLocations.begin() here leaves a tile no builder will accept, and the
+            // caller still queues it. Look next to the main nexus instead.
+            if (tentative) return false;
+
+            auto tile = BuildingPlacement::reachablePylonNearMain();
+            if (!tile.isValid())
+            {
+                Log::Get() << "No reachable pylon near the main";
+                BnetLog::event("pylon_near_main none");
+                return false;
+            }
+
+            auto origin = Map::getMyMain()->getPosition();
+            int frames = BuildingPlacement::builderFrames(origin, tile, BWAPI::UnitTypes::Protoss_Pylon);
+            pylon.estimatedWorkerMovementTime = frames;
+            pylon.buildLocation = BuildingPlacement::BuildLocation(Block::Location(tile), frames, 0, 0);
+            Log::Get() << "No registered pylon is reachable; using " << tile << " next to the main";
+            BnetLog::event("pylon_near_main x=" + std::to_string(tile.x) + " y=" + std::to_string(tile.y));
+            return true;
         }
 
         bool reserveBuildPositions(ProductionItemSet &items, bool commit)
