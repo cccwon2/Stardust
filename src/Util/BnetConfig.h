@@ -82,6 +82,23 @@ namespace BnetConfig
         int pvzAllinZealots = 4;                // FFEDragoons: minimum zealots vs. an all-in, above probe production (0-12)
         int pvzAllinProbeCap = 18;              // FFE: probes above this move below zealots during an all-in. 0 = off
 
+        // PvT vs. vulture drops / runbys and spider mines (2026-11-15 KnockOut analysis)
+        bool invalidMoveGuard = true;           // Reject move orders to invalid positions (upstream sent them to (4095,4095))
+        bool workerFleeVultures = true;         // Workers flee vultures at their base instead of attacking them (no cannon there)
+        int workerFleeMarginPx = 96;            // Vulture within its range + this margin of a worker counts as a threat
+        int workerFleeHoldFrames = 48;          // Keep fleeing this long after the last threat (avoids flee / mine yo-yo)
+        bool probeThrottleUnderVultures = true; // Probe production below army / defense while vultures are at one of our bases
+        int blindMainCannonFrame = 6000;        // From this frame, main cannon even without a seen mech threat. 0 = off
+        int homeGuardDragoons = 1;              // Dragoons kept at the main until the first observer is out. 0 = off
+        int homeGuardUntilFrame = 14000;        // Home guard ends at this frame at the latest
+        bool observerEmergencyPriority = true;  // Mine seen / drop risk with observatory done: observer at emergency priority
+        bool mineHoldUntilObserver = true;      // Army defends the main after a mine is seen until the first observer is out
+        int mineHoldMaxFrame = 12000;           // ... but not past this frame
+        int plutoRescoutFrame = 4800;           // Second probe scout of the enemy main / natural at this frame. 0 = off
+        int plutoRescoutMaxFrames = 1440;       // Give up the re-scout after this many frames
+        bool dropRiskDetection = true;          // Starport / control tower / dropship seen early -> treat as drop risk
+        int midgameStrategyHoldFrames = 480;    // MidGameMech / Bio / BioMech switches need this many frames since the last change
+
         // Phase 3: Lightweight log
         bool printBuildInfo = true;             // Local-only in-game message at game start: build id and config source
         bool bnetLog = true;                    // Write one-line summaries to bwapi-data/write/stardust_bnet.log

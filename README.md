@@ -91,6 +91,16 @@ powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 | `attack_abort_stable_frames` | `24` | 후퇴 판단이 이 프레임 동안 유지돼야 공격 중단(원작 6) |
 | `regroup_commit_frames` | `0` | 도망 중이 아닌 재집결을 최소 유지할 프레임; 0은 끔 |
 | `flee_guard` / `flee_guard_max_loss` / `flee_guard_speed_ratio` | `true` / `0.85` / `1.25` | 붙어 있는 적 지상군 절반 이상이 우리보다 빠르면(벌처) 도망 대신 교전; 시즈 탱크 사거리 안이거나 85% 이상 손실 예측이면 도망 |
+| `invalid_move_guard` | `true` | 잘못된 좌표(맵 우하단 (4095,4095))로의 이동 명령 차단 |
+| `worker_flee_vultures` / `worker_flee_margin_px` / `worker_flee_hold_frames` | `true` / `96` / `48` | 미네랄 라인 캐논이 없을 때 일꾼이 벌처와 싸우지 않고 다른 기지(본진↔앞마당)나 반대 방향으로 피신, 위협이 사라진 뒤 48프레임 유지 |
+| `probe_throttle_under_vultures` | `true` | 우리 기지에 벌처가 있는 동안 프로브 생산을 병력·캐논·옵저버 뒤로 미룸(프로브 8기 이상일 때) |
+| `blind_main_cannon_frame` | `6000` | 이 프레임(약 4:10)부터 위협이 안 보여도 본진 미네랄 라인 캐논 요청(초반 바이오·러시 판별 시 제외); 0은 끔 |
+| `home_guard_dragoons` / `home_guard_until_frame` | `1` / `14000` | 첫 옵저버 전까지 본진에 드라군 수비 유지 |
+| `observer_emergency_priority` | `true` | 마인 발견(또는 드랍 위험 + 옵저버터리 완성) 시 첫 옵저버를 프로브보다 먼저 생산 |
+| `mine_hold_until_observer` / `mine_hold_max_frame` | `true` / `12000` | 마인 발견 후 첫 옵저버 완성 전까지 본진 수비 유지 |
+| `pluto_rescout_frame` / `pluto_rescout_max_frames` | `4800` / `1440` | 약 3:20에 프로브로 적 본진·앞마당 재정찰; 0은 끔 |
+| `drop_risk_detection` | `true` | 스타포트·컨트롤 타워·드랍십을 보면 드랍 위험으로 보고 본진 캐논·옵저버 우선순위 상향 |
+| `midgame_strategy_hold_frames` | `480` | MidGameMech/Bio/BioMech 사이 전환은 직전 전환 후 480프레임(20초)이 지나야 반영 |
 | `forced_pvz_opening` | `FFEDragoons` | 저그전 오프닝 고정(`FFEDragoons` / `SairSpeedlot` / `EarlyGameDefense`); 빈 값은 UCB1 |
 | `pvz_antiallin_fix` | `true` | 저그전 저글링 올인 대응 스위치 |
 | `pvz_allin_base_lings` / `pvz_allin_seen_lings` | `6` / `12` | 본진·앞마당에 보인 저글링 / 살아 있는 저글링 수로 올인 조기 확정 |
@@ -117,12 +127,12 @@ powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 - `[APM]`: 2880프레임마다(게임 시간 약 2분) 자체 명령 수(`orders_per_min`, 유닛 종류별 누적), 생략된 이동(`moves_skipped`, `grid_holds`), 반복 명령 생략(`orders_repeat_skipped`), 갇힌 일꾼 대기(`unstick_backoffs`), 지연·명령 간격(`latency_max`, `cmd_interval`)과 기타 누적 카운터
 - `[END]`: 승패, 최종 전략, 종료 APM 및 누적 카운터
 
-명령량은 `orders_per_min`으로 확인하세요. `bwapi_apm`은 Remastered에서 0으로 기록되며, 원래 BWAPI의 감쇠된 최근 APM으로 경기 전체 평균이나 자체 명령 횟수가 아닙니다. `bwapi_apm_at_end`는 종료 시 값, `bwapi_apm_max_sampled`는 주기 표본 중 최대값으로 표본 사이 순간 피크는 놓칠 수 있습니다. `res_*`는 단순 채취 일꾼의 가드 대상 자원 명령만 집계하고, 복구 명령은 `stuck_*`로 별도 집계합니다. `bio_to_attack` / `bio_to_regroup`는 MidGameBio 배율이 적용되는 동안의 실제 상태 전환 횟수입니다. `attack_commit_holds`, `flee_guard_fights`, `dragoon_unsticks`(공격 취소로 멈춘 드라군 Stop), `micro_latency`(실제 적용 지연)는 테란전 교전 수정의 동작 확인용입니다.
+명령량은 `orders_per_min`으로 확인하세요. `bwapi_apm`은 Remastered에서 0으로 기록되며, 원래 BWAPI의 감쇠된 최근 APM으로 경기 전체 평균이나 자체 명령 횟수가 아닙니다. `bwapi_apm_at_end`는 종료 시 값, `bwapi_apm_max_sampled`는 주기 표본 중 최대값으로 표본 사이 순간 피크는 놓칠 수 있습니다. `res_*`는 단순 채취 일꾼의 가드 대상 자원 명령만 집계하고, 복구 명령은 `stuck_*`로 별도 집계합니다. `bio_to_attack` / `bio_to_regroup`는 MidGameBio 배율이 적용되는 동안의 실제 상태 전환 횟수입니다. `attack_commit_holds`, `flee_guard_fights`, `dragoon_unsticks`(공격 취소로 멈춘 드라군 Stop), `micro_latency`(실제 적용 지연)는 테란전 교전 수정의 동작 확인용입니다. `invalid_moves`(차단된 잘못된 이동), `worker_flees`(벌처를 피해 피신한 일꾼)는 벌처 대응 수정의 확인용이며, `[EVENT] previous_game_unfinished`는 직전 경기가 `[END]` 없이 끝났음(크래시·강제 종료·연결 끊김)을 뜻합니다.
 
 코드·문서·빌드 스크립트가 존재하는 것과 실행 검증은 구분합니다.
 
-- 확인됨: [독립 정책 테스트](tools/bnet-policy-test) 154개 검사와 설정 로더 테스트 통과(Linux g++), 변경 소스의 g++ 문법 검사. 사용자 Windows 환경에서 `bnet-pluto@9fabc694` 빌드가 배틀넷 저그전에서 실행되어 새 기본 설정으로 동작하고(`config=defaults`) 2분 시점 `orders_per_min`이 약 100으로 기록됨.
-- 미확인: PR #8(저그전 올인 대응)의 Windows 빌드와 실전 효과, 중후반 대규모 교전의 명령량, 이동 명령 생략이 드라군 컨트롤에 주는 영향. 승률 향상은 보증하지 않습니다. 기본 전술 수치는 실전 조정의 출발점입니다. 하이템플러 스톰 마이크로는 추가되지 않았고, 경로 추적의 후속 waypoint 이동은 채취 이동 가드 대상이 아닙니다.
+- 확인됨: [독립 정책 테스트](tools/bnet-policy-test) 234개 검사와 설정 로더 테스트 통과(Linux g++), 변경 소스의 g++ 문법 검사. 사용자 Windows 환경에서 `bnet-pluto@9fabc694` 빌드가 배틀넷 저그전에서 실행되어 새 기본 설정으로 동작하고(`config=defaults`) 2분 시점 `orders_per_min`이 약 100으로 기록됨.
+- 미확인: 벌처 드랍·마인 대응(드랍 위험 인식, 일꾼 피신, 본진 캐논, 홈 가드, 옵저버 긴급 생산, 재정찰)의 Windows 빌드와 실전 효과, PR #8(저그전 올인 대응)의 Windows 빌드와 실전 효과, 중후반 대규모 교전의 명령량, 이동 명령 생략이 드라군 컨트롤에 주는 영향. 승률 향상은 보증하지 않습니다. 기본 전술 수치는 실전 조정의 출발점입니다. 하이템플러 스톰 마이크로는 추가되지 않았고, 경로 추적의 후속 waypoint 이동은 채취 이동 가드 대상이 아닙니다.
 
 ## About
 Stardust is written in C++ and uses [BWAPI](https://github.com/bwapi/bwapi) to play 1v1 Melee games of StarCraft: Brood War. Stardust plays as the Protoss race.

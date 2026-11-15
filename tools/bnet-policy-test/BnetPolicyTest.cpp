@@ -476,6 +476,66 @@ namespace
     }
 }
 
+namespace
+{
+    void testAntiVulture()
+    {
+        using S = DetectionStage;
+        using P = ObserverPriority;
+        // observer_emergency_priority on
+        CHECK(observerPriority(S::Urgent, true, false, false) == P::Emergency);
+        CHECK(observerPriority(S::Elevated, true, true, true) == P::Emergency);
+        CHECK(observerPriority(S::Elevated, true, false, true) == P::SpecialTeams);
+        CHECK(observerPriority(S::Preventive, true, false, true) == P::SpecialTeams);
+        CHECK(observerPriority(S::Preventive, true, false, false) == P::Normal);
+        CHECK(observerPriority(S::ElevatedWaiting, true, true, true) == P::SpecialTeams);
+        CHECK(observerPriority(S::Upstream, true, true, true) == P::Normal);
+        // off: previous behavior
+        CHECK(observerPriority(S::Urgent, false, true, true) == P::SpecialTeams);
+        CHECK(observerPriority(S::Elevated, false, true, true) == P::SpecialTeams);
+        CHECK(observerPriority(S::Preventive, false, true, true) == P::Normal);
+
+        CHECK(blindMainCannonDue(6000, 6000, false));
+        CHECK(!blindMainCannonDue(5999, 6000, false));
+        CHECK(!blindMainCannonDue(9000, 6000, true));
+        CHECK(!blindMainCannonDue(9000, 0, false));
+
+        CHECK(homeGuardActive(true, 1, 8000, 14000, 0));
+        CHECK(!homeGuardActive(true, 1, 8000, 14000, 1));
+        CHECK(!homeGuardActive(true, 0, 8000, 14000, 0));
+        CHECK(!homeGuardActive(true, 1, 14000, 14000, 0));
+        CHECK(!homeGuardActive(false, 1, 8000, 14000, 0));
+        // DefendBase requests zealot-value units until ourValue >= enemyValue * 6 / 5
+        for (int n = 1; n <= 4; n++)
+        {
+            int zv = 600;
+            int ev = homeGuardValue(n, zv);
+            int requested = 0, ours = 0;
+            while (ours < (ev * 6) / 5) { requested++; ours += zv; }
+            CHECK(requested == n);
+        }
+        CHECK(homeGuardValue(0, 600) == 0);
+
+        CHECK(mineHoldActive(true, true, true, 0, 9000, 12000));
+        CHECK(!mineHoldActive(true, true, true, 1, 9000, 12000));
+        CHECK(!mineHoldActive(true, true, false, 0, 9000, 12000));
+        CHECK(!mineHoldActive(true, true, true, 0, 12000, 12000));
+        CHECK(!mineHoldActive(true, false, true, 0, 9000, 12000));
+
+        CHECK(midgameSwitchAllowed(true, true, 480, 480));
+        CHECK(!midgameSwitchAllowed(true, true, 100, 480));
+        CHECK(midgameSwitchAllowed(false, true, 0, 480));
+        CHECK(midgameSwitchAllowed(true, false, 0, 480));
+        CHECK(midgameSwitchAllowed(true, true, 0, 0));
+
+        CHECK(dropRisk(true, true, false, false, 5000, 12000));
+        CHECK(dropRisk(true, false, false, true, 5000, 12000));
+        CHECK(!dropRisk(true, true, true, true, 12000, 12000));
+        CHECK(!dropRisk(false, true, true, true, 5000, 12000));
+        CHECK(!dropRisk(true, false, false, false, 5000, 12000));
+    }
+}
+
 int main()
 {
     testStuck();
@@ -491,6 +551,7 @@ int main()
     testCannonTargets();
     testPvzAllIn();
     testCombatFix();
+    testAntiVulture();
 
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

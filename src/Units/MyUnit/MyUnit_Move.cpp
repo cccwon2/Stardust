@@ -82,8 +82,13 @@ void MyUnitImpl::issueMoveOrders()
     // If the unit has just been unstuck, reissue the command to move towards our current target position
     if (unstickUntil == currentFrame)
     {
-        move(currentlyMovingTowards);
-        return;
+        // currentlyMovingTowards is not set while mineral walking (and is Invalid after resetMoveData); fall through to the
+        // normal waypoint update instead of sending the unit to an invalid position
+        if (currentlyMovingTowards.isValid() || !BnetConfig::get().invalidMoveGuard)
+        {
+            move(currentlyMovingTowards);
+            return;
+        }
     }
 
     // Update the move

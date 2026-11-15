@@ -580,4 +580,78 @@ namespace BnetPolicy
         if (in.fastPursuers * 2 < in.engagedPursuers) return false;
         return in.myPercentLost < in.maxLoss;
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // PvT vs. vulture drops / runbys and spider mines (2026-11-15 KnockOut analysis)
+    // ---------------------------------------------------------------------------------------------
+
+    // Observer production priority tier for the first-observer stages (observer_emergency_priority).
+    // Emergency = PRIORITY_EMERGENCY (above probes), SpecialTeams = PRIORITY_SPECIALTEAMS, Normal = PRIORITY_NORMAL.
+    enum class ObserverPriority { Emergency, SpecialTeams, Normal };
+
+    inline ObserverPriority observerPriority(DetectionStage stage, bool emergencyEnabled, bool observatoryComplete,
+                                             bool roboticsComplete)
+    {
+        if (!emergencyEnabled)
+        {
+            return detectionStageIsHighPriority(stage) ? ObserverPriority::SpecialTeams : ObserverPriority::Normal;
+        }
+        switch (stage)
+        {
+            case DetectionStage::Urgent:
+                return ObserverPriority::Emergency;
+            case DetectionStage::Elevated:
+                return observatoryComplete ? ObserverPriority::Emergency : ObserverPriority::SpecialTeams;
+            case DetectionStage::ElevatedWaiting:
+            case DetectionStage::Preventive:
+                return roboticsComplete ? ObserverPriority::SpecialTeams : ObserverPriority::Normal;
+            case DetectionStage::Upstream:
+                break;
+        }
+        return ObserverPriority::Normal;
+    }
+
+    // Main mineral line cannon without a seen mech threat (blind_main_cannon_frame): Pluto's 1-1-1 drop is often not
+    // scouted, so from the given frame the main gets its cannon anyway, unless we are holding early bio aggression.
+    inline bool blindMainCannonDue(int frame, int blindFrame, bool earlyBioOrRush)
+    {
+        return blindFrame > 0 && frame >= blindFrame && !earlyBioOrRush;
+    }
+
+    // Home guard (home_guard_dragoons): keep dragoons at the main until the first observer is out
+    inline bool homeGuardActive(bool snipe, int dragoons, int frame, int untilFrame, int completedObservers)
+    {
+        return snipe && dragoons > 0 && frame < untilFrame && completedObservers == 0;
+    }
+
+    // DefendBase "enemy value" that makes DefendBase request about `dragoons` units: it requests zealot-value units until
+    // ourValue >= enemyValue * 6 / 5, so a value just below dragoons * zealotValue * 5 / 6 asks for that many.
+    inline int homeGuardValue(int dragoons, int zealotValue)
+    {
+        if (dragoons <= 0 || zealotValue <= 0) return 0;
+        int value = (dragoons * zealotValue * 5) / 6 - 1;
+        return value > 1 ? value : 1;
+    }
+
+    // Mine hold (mine_hold_until_observer): army defends the main after a mine is seen until the first observer is out
+    inline bool mineHoldActive(bool snipe, bool enabled, bool mineSeen, int completedObservers, int frame, int maxFrame)
+    {
+        return snipe && enabled && mineSeen && completedObservers == 0 && frame < maxFrame;
+    }
+
+    // Mid-game strategy hysteresis (midgame_strategy_hold_frames): a switch between two MidGame* strategies is only
+    // accepted once the current one has been held this long. Switches into or out of the mid game are never delayed.
+    inline bool midgameSwitchAllowed(bool currentIsMidGame, bool newIsMidGame, int framesSinceLastChange, int holdFrames)
+    {
+        if (holdFrames <= 0) return true;
+        if (!currentIsMidGame || !newIsMidGame) return true;
+        return framesSinceLastChange >= holdFrames;
+    }
+
+    // Drop risk: starport, control tower or dropship seen before the given frame
+    inline bool dropRisk(bool enabled, bool starport, bool controlTower, bool dropship, int frame, int untilFrame)
+    {
+        if (!enabled || frame >= untilFrame) return false;
+        return starport || controlTower || dropship;
+    }
 }

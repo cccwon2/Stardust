@@ -89,6 +89,8 @@ namespace BnetLog
         int dragoonUnsticks = 0;
         int mechGateState = -1;     // -1 unknown, 0 open, 1 blocked
         int mechGateBlocks = 0;     // Number of open -> blocked transitions
+        int invalidMoves = 0;
+        int workerFlees = 0;
     }
 
     void mechDecision(bool wasAttacking, bool nowAttacking)
@@ -145,6 +147,11 @@ namespace BnetLog
         dragoonUnsticks++;
     }
 
+    void workerFlee()
+    {
+        workerFlees++;
+    }
+
     ResourceOrderStats &resourceOrders()
     {
         return resourceOrderStats;
@@ -180,6 +187,8 @@ namespace BnetLog
             dragoonUnsticks = 0;
             mechGateState = -1;
             mechGateBlocks = 0;
+            invalidMoves = 0;
+            workerFlees = 0;
         }
 
         // Cumulative counters, appended to [APM] and [END]
@@ -216,6 +225,8 @@ namespace BnetLog
                << " dragoon_unsticks=" << dragoonUnsticks
                << " micro_latency=" << BnetConfig::microLatencyFrames()
                << " mech_gate_blocks=" << mechGateBlocks
+               << " invalid_moves=" << invalidMoves
+               << " worker_flees=" << workerFlees
                << " latency_max=" << BnetConfig::maxLatencyFrames()
                << " cmd_interval=" << BnetConfig::commandIntervalFrames();
             return os.str();
@@ -226,6 +237,10 @@ namespace BnetLog
     namespace
     {
         const char *logPath = "bwapi-data/write/stardust_bnet.log";
+
+        // Written at game start and removed after [END]; if it still exists at the next start, the previous game ended
+        // without onEnd (crash, forced close or a bridge disconnect) and an [EVENT] previous_game_unfinished line is written.
+        const char *markerPath = "bwapi-data/write/stardust_bnet.running";
         const int apmIntervalFrames = 24 * 60 * 2;  // 2 game minutes at fastest speed
 
         std::ofstream file;
@@ -292,7 +307,23 @@ namespace BnetLog
         }
         if (!active) return;
 
+        // Read the marker of a previous game that never reached onEnd, then write our own
+        std::string unfinishedGame;
+        try
+        {
+            std::ifstream marker(markerPath);
+            if (marker.good()) std::getline(marker, unfinishedGame);
+        }
+        catch (...) {}
+
         auto game = BWAPI::BroodwarPtr;
+        try
+        {
+            std::ofstream marker(markerPath, std::ios::out | std::ios::trunc);
+            marker << "build=" << buildId() << " started=" << timestamp() << " map=\"" << game->mapFileName() << "\"\n";
+        }
+        catch (...) {}
+
         std::ostringstream os;
         os << "build=" << buildId()
            << " map=\"" << game->mapFileName() << "\""
@@ -303,6 +334,21 @@ namespace BnetLog
            << " multiplayer=" << game->isMultiplayer()
            << " " << BnetConfig::summary();
         writeLine("START", os.str());
+
+        if (!unfinishedGame.empty())
+        {
+            writeLine("EVENT", "previous_game_unfinished " + unfinishedGame
+                               + " (no [END]: crash, forced close or disconnect; check Windows Event Viewer > Application)");
+        }
+    }
+
+    void invalidMove(const std::string &unitType)
+    {
+        invalidMoves++;
+        if (invalidMoves <= 3 || invalidMoves % 500 == 0)
+        {
+            writeLine("EVENT", "invalid_move unit=" + unitType + " count=" + std::to_string(invalidMoves));
+        }
     }
 
     void onFrame()
@@ -377,8 +423,12 @@ namespace BnetLog
 
         file.close();
         active = false;
+
+        std::error_code ec;
+        std::filesystem::remove(markerPath, ec);
     }
 #else
+    void invalidMove(const std::string &) { invalidMoves++; }
     void gameStart() { resetCounters(); }
     void onFrame() {}
     void enemyStrategyChanged(const std::string &) {}

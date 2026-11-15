@@ -76,6 +76,18 @@ int main(){
   C(!c.fleeGuard && c.fleeGuardMaxLoss==0.0 && c.fleeGuardSpeedRatio==1.0 && !c.inFlightMoveGuard && !c.pvtCombatCommit);
   w("{\"micro_latency_frames\": -7}"); BnetConfig::initialize(); c=BnetConfig::get();
   C(c.microLatencyFrames==-1);
+  // Anti-vulture keys: defaults and clamping
+  w("{}"); BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.invalidMoveGuard && c.workerFleeVultures && c.workerFleeMarginPx==96 && c.workerFleeHoldFrames==48 && c.probeThrottleUnderVultures);
+  C(c.blindMainCannonFrame==6000 && c.homeGuardDragoons==1 && c.homeGuardUntilFrame==14000 && c.observerEmergencyPriority);
+  C(c.mineHoldUntilObserver && c.mineHoldMaxFrame==12000 && c.plutoRescoutFrame==4800 && c.plutoRescoutMaxFrames==1440);
+  C(c.dropRiskDetection && c.midgameStrategyHoldFrames==480);
+  w("{\"worker_flee_margin_px\": 999, \"worker_flee_hold_frames\": -1, \"blind_main_cannon_frame\": 100, \"home_guard_dragoons\": 9, \"pluto_rescout_frame\": 99999, \"pluto_rescout_max_frames\": 1, \"midgame_strategy_hold_frames\": 99999, \"invalid_move_guard\": false}");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.workerFleeMarginPx==256 && c.workerFleeHoldFrames==0 && c.blindMainCannonFrame==3000 && c.homeGuardDragoons==4);
+  C(c.plutoRescoutFrame==12000 && c.plutoRescoutMaxFrames==240 && c.midgameStrategyHoldFrames==2400 && !c.invalidMoveGuard);
+  w("{\"blind_main_cannon_frame\": 0, \"pluto_rescout_frame\": -1}"); BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.blindMainCannonFrame==0 && c.plutoRescoutFrame==0);
   printf("%s\n", BnetConfig::summary().c_str());
   printf("fails=%d\n",fails); return fails;
 }

@@ -20,6 +20,8 @@
 #include "Plays/MainArmy/ForgeFastExpand.h"
 #include "Plays/Scouting/EarlyGameWorkerScout.h"
 #include "Plays/Scouting/EjectEnemyScout.h"
+#include "Plays/Scouting/PlutoRescout.h"
+#include "General.h"
 #include "Plays/SpecialTeams/Elevator.h"
 #include "Plays/SpecialTeams/ElevatorRush.h"
 
@@ -35,6 +37,30 @@ namespace
     }
 
     // pvt_mech_fix: active while pluto_pvt_snipe is on and the enemy is recognized as MidGameMech
+    bool isMidGameStrategy(PvT::TerranStrategy strategy)
+    {
+        return strategy == PvT::TerranStrategy::MidGameMech ||
+               strategy == PvT::TerranStrategy::MidGameBio ||
+               strategy == PvT::TerranStrategy::MidGameBioMech;
+    }
+
+    // Enemy early bio / rush recognized (or we are holding one): no blind main cannon / home guard reasoning needed
+    bool earlyBioOrRush(PvT::TerranStrategy enemyStrategy, PvT::OurStrategy ourStrategy)
+    {
+        return enemyStrategy == PvT::TerranStrategy::MarineRush ||
+               enemyStrategy == PvT::TerranStrategy::BunkerContain ||
+               enemyStrategy == PvT::TerranStrategy::ProxyRush ||
+               enemyStrategy == PvT::TerranStrategy::WorkerRush ||
+               enemyStrategy == PvT::TerranStrategy::MarinePressure ||
+               ourStrategy == PvT::OurStrategy::AntiMarineRush;
+    }
+
+    bool enemyMineSeen()
+    {
+        return Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Vulture_Spider_Mine) ||
+               Players::hasResearched(BWAPI::Broodwar->enemy(), BWAPI::TechTypes::Spider_Mines);
+    }
+
     bool bnetMechFixActive(PvT::TerranStrategy enemyStrategy)
     {
         auto &bnetConfig = BnetConfig::get();
@@ -112,9 +138,65 @@ void PvT::initialize(std::vector<std::shared_ptr<Play>> &plays, bool transitioni
     Opponent::addEnemyStrategyChange(TerranStrategyNames[enemyStrategy]);
 }
 
+void PvT::updatePlutoSignals(std::vector<std::shared_ptr<Play>> &plays)
+{
+    auto &bnetConfig = BnetConfig::get();
+    if (!bnetConfig.plutoPvtSnipe) return;
+
+    // Drop risk: starport / control tower / dropship before ~8:20
+    if (!plutoDropRisk && BnetPolicy::dropRisk(bnetConfig.dropRiskDetection,
+                                               Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Starport),
+                                               Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Control_Tower),
+                                               Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Dropship),
+                                               currentFrame,
+                                               12000))
+    {
+        plutoDropRisk = true;
+        std::ostringstream ev;
+        ev << "drop_risk starport=" << Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Starport)
+           << " control_tower=" << Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Control_Tower)
+           << " dropship=" << Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Dropship);
+        Log::Get() << "Pluto " << ev.str();
+        BnetLog::event(ev.str());
+    }
+
+    // Second worker scout
+    if (!plutoRescoutAdded && bnetConfig.plutoRescoutFrame > 0 && currentFrame >= bnetConfig.plutoRescoutFrame)
+    {
+        plutoRescoutAdded = true;
+        if (!earlyBioOrRush(enemyStrategy, ourStrategy) && Map::getEnemyStartingMain())
+        {
+            plays.emplace(beforePlayIt<MainArmyPlay>(plays), std::make_shared<PlutoRescout>(bnetConfig.plutoRescoutMaxFrames));
+        }
+        else
+        {
+            BnetLog::event(std::string("rescout_skipped reason=") + (Map::getEnemyStartingMain() ? "early_bio_or_rush" : "enemy_main_unknown"));
+        }
+    }
+}
+
 void PvT::updatePlays(std::vector<std::shared_ptr<Play>> &plays)
 {
     auto newEnemyStrategy = recognizeEnemyStrategy();
+
+    // midgame_strategy_hold_frames: don't flap between MidGameMech / MidGameBio / MidGameBioMech every few seconds
+    {
+        auto &bnetConfig = BnetConfig::get();
+        if (bnetConfig.plutoPvtSnipe && newEnemyStrategy != enemyStrategy &&
+            !BnetPolicy::midgameSwitchAllowed(isMidGameStrategy(enemyStrategy),
+                                              isMidGameStrategy(newEnemyStrategy),
+                                              currentFrame - enemyStrategyChanged,
+                                              bnetConfig.midgameStrategyHoldFrames))
+        {
+            if (plutoMidgameHolds++ == 0)
+            {
+                BnetLog::event(std::string("midgame_switch_held from=") + TerranStrategyNames[enemyStrategy]
+                               + " to=" + TerranStrategyNames[newEnemyStrategy]);
+            }
+            newEnemyStrategy = enemyStrategy;
+        }
+    }
+
     auto newStrategy = chooseOurStrategy(newEnemyStrategy, plays);
 
     if (enemyStrategy != newEnemyStrategy)
@@ -213,7 +295,27 @@ void PvT::updatePlays(std::vector<std::shared_ptr<Play>> &plays)
         }
     }
 
+    // mine_hold_until_observer: after a spider mine is seen, don't walk the army over mines until the first observer is out
+    {
+        auto &bnetConfig = BnetConfig::get();
+        bool hold = BnetPolicy::mineHoldActive(bnetConfig.plutoPvtSnipe,
+                                               bnetConfig.mineHoldUntilObserver,
+                                               enemyMineSeen(),
+                                               Units::countCompleted(BWAPI::UnitTypes::Protoss_Observer),
+                                               currentFrame,
+                                               bnetConfig.mineHoldMaxFrame);
+        if (hold != plutoMineHold)
+        {
+            plutoMineHold = hold;
+            BnetLog::event(std::string("mine_hold ") + (hold ? "start" : "end")
+                           + " observers=" + std::to_string(Units::countCompleted(BWAPI::UnitTypes::Protoss_Observer)));
+        }
+        if (hold) defendOurMain = true;
+    }
+
     updateAttackPlays(plays, defendOurMain);
+
+    updatePlutoSignals(plays);
 
     // Set the worker scout to monitor the enemy choke if we've detected a non-proxy marine rush
     if (Strategist::getWorkerScoutStatus() == Strategist::WorkerScoutStatus::EnemyBaseScouted &&
@@ -227,7 +329,30 @@ void PvT::updatePlays(std::vector<std::shared_ptr<Play>> &plays)
         }
     }
 
-    updateDefendBasePlays(plays);
+    // home_guard_dragoons: keep dragoons at the main against drops until the first observer is out
+    int homeGuardValue = 0;
+    {
+        auto &bnetConfig = BnetConfig::get();
+        bool guard = BnetPolicy::homeGuardActive(bnetConfig.plutoPvtSnipe,
+                                                 bnetConfig.homeGuardDragoons,
+                                                 currentFrame,
+                                                 bnetConfig.homeGuardUntilFrame,
+                                                 Units::countCompleted(BWAPI::UnitTypes::Protoss_Observer))
+                     && !earlyBioOrRush(enemyStrategy, ourStrategy);
+        if (guard)
+        {
+            homeGuardValue = BnetPolicy::homeGuardValue(bnetConfig.homeGuardDragoons,
+                                                        CombatSim::unitValue(BWAPI::UnitTypes::Protoss_Zealot));
+        }
+        if (guard != plutoHomeGuard)
+        {
+            plutoHomeGuard = guard;
+            BnetLog::event(std::string("home_guard ") + (guard ? "start" : "end")
+                           + " dragoons=" + std::to_string(bnetConfig.homeGuardDragoons));
+        }
+    }
+
+    updateDefendBasePlays(plays, homeGuardValue);
     updateSpecialTeamsPlays(plays);
     defaultExpansions(plays);
     scoutExpos(plays, 15000);
@@ -799,14 +924,6 @@ void PvT::handleDetection(std::vector<std::shared_ptr<Play>> &plays, std::map<in
                                                           1);
     };
 
-    // Build an observer if the enemy has cloaked wraith tech
-    if (Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Control_Tower) ||
-        Players::hasResearched(BWAPI::Broodwar->enemy(), BWAPI::TechTypes::Cloaking_Field))
-    {
-        buildObserver(PRIORITY_SPECIALTEAMS);
-        return;
-    }
-
     // Pluto snipe: first-observer policy, see BnetPolicy::decideDetection.
     // Only governs the first observer; once one exists, or when no early condition applies, the upstream policy below runs.
     // The producer adds the robotics facility and observatory prerequisites at the same priority.
@@ -819,7 +936,8 @@ void PvT::handleDetection(std::vector<std::shared_ptr<Play>> &plays, std::map<in
                 Players::hasResearched(BWAPI::Broodwar->enemy(), BWAPI::TechTypes::Spider_Mines),
                 enemyStrategy == TerranStrategy::TwoFactory ||
                 enemyStrategy == TerranStrategy::MidGameMech ||
-                enemyStrategy == TerranStrategy::MidGameBioMech,
+                enemyStrategy == TerranStrategy::MidGameBioMech ||
+                plutoDropRisk,
                 Units::countEnemy(BWAPI::UnitTypes::Terran_Vulture),
                 Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Vulture) ||
                 Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Machine_Shop),
@@ -851,10 +969,28 @@ void PvT::handleDetection(std::vector<std::shared_ptr<Play>> &plays, std::map<in
 
         if (stage != BnetPolicy::DetectionStage::Upstream)
         {
-            buildObserver(BnetPolicy::detectionStageIsHighPriority(stage) ? PRIORITY_SPECIALTEAMS : PRIORITY_NORMAL);
+            // observer_emergency_priority: once a mine is seen (or a drop is likely and the observatory is done), the observer
+            // goes above probes; in the KnockOut game the observatory finished at 5:46 but the observer only started at 8:49
+            auto tier = BnetPolicy::observerPriority(stage,
+                                                     bnetConfig.observerEmergencyPriority,
+                                                     Units::countCompleted(BWAPI::UnitTypes::Protoss_Observatory) > 0,
+                                                     Units::countCompleted(BWAPI::UnitTypes::Protoss_Robotics_Facility) > 0);
+            int priority = tier == BnetPolicy::ObserverPriority::Emergency
+                           ? PRIORITY_EMERGENCY
+                           : (tier == BnetPolicy::ObserverPriority::SpecialTeams ? PRIORITY_SPECIALTEAMS : PRIORITY_NORMAL);
+            buildObserver(priority);
             return;
         }
     }
+
+    // Build an observer if the enemy has cloaked wraith tech
+    if (Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Control_Tower) ||
+        Players::hasResearched(BWAPI::Broodwar->enemy(), BWAPI::TechTypes::Cloaking_Field))
+    {
+        buildObserver(PRIORITY_SPECIALTEAMS);
+        return;
+    }
+
 
     // In all other cases, wait until we are on two bases
     if (Units::countCompleted(BWAPI::UnitTypes::Protoss_Nexus) < 2) return;
@@ -918,7 +1054,18 @@ void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &
                       Units::countEnemy(BWAPI::UnitTypes::Terran_Vulture) > 2 ||
                       Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Vulture_Spider_Mine);
 
-    auto requestCannonsAtBase = [&](Base *base, int target, const char *kind)
+    // Main threat: the mech threat, a likely drop (starport / control tower / dropship) or the blind timing
+    // (blind_main_cannon_frame) unless we face early bio / a rush
+    bool blindMain = BnetPolicy::blindMainCannonDue(currentFrame, bnetConfig.blindMainCannonFrame,
+                                                    earlyBioOrRush(enemyStrategy, ourStrategy));
+    bool mainThreat = mechThreat || plutoDropRisk || blindMain;
+    if (blindMain && !mechThreat && !plutoDropRisk && !plutoBlindMainCannonLogged)
+    {
+        plutoBlindMainCannonLogged = true;
+        BnetLog::event("blind_main_cannon frame=" + std::to_string(bnetConfig.blindMainCannonFrame));
+    }
+
+    auto requestCannonsAtBase = [&](Base *base, int target, const char *kind, bool threat)
     {
         if (!base || target <= 0) return;
         if (!base->resourceDepot || !base->resourceDepot->completed) return;
@@ -956,7 +1103,7 @@ void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &
                 buildAtTile(locations.powerPylon,
                             BWAPI::UnitTypes::Protoss_Pylon,
                             0,
-                            BnetPolicy::cannonRequestUrgent(bnetConfig.cannonThreatPriority, mechThreat, 0, 0));
+                            BnetPolicy::cannonRequestUrgent(bnetConfig.cannonThreatPriority, threat, 0, 0));
             }
             return;
         }
@@ -987,7 +1134,7 @@ void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &
         int framesUntilPowered = pylon->completed ? 0 : std::max(0, pylon->estimatedCompletionFrame - currentFrame);
         for (int i = 0; i < plan.requestCount; i++)
         {
-            bool urgent = BnetPolicy::cannonRequestUrgent(bnetConfig.cannonThreatPriority, mechThreat, plan.existing, i);
+            bool urgent = BnetPolicy::cannonRequestUrgent(bnetConfig.cannonThreatPriority, threat, plan.existing, i);
             buildAtTile(locations.workerDefenseCannons[plan.requestIndices[i]],
                         BWAPI::UnitTypes::Protoss_Photon_Cannon,
                         framesUntilPowered,
@@ -1004,18 +1151,19 @@ void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &
                 std::ostringstream ev;
                 ev << "cannon_plan base=" << kind << " tile=" << base->getTilePosition().x << "," << base->getTilePosition().y
                    << " target=" << target << " existing=" << plan.existing << " requested=" << plan.requestCount
-                   << " urgent=" << BnetPolicy::cannonRequestUrgent(bnetConfig.cannonThreatPriority, mechThreat, plan.existing, 0)
-                   << " mech_threat=" << mechThreat;
+                   << " urgent=" << BnetPolicy::cannonRequestUrgent(bnetConfig.cannonThreatPriority, threat, plan.existing, 0)
+                   << " mech_threat=" << mechThreat
+                   << " drop_risk=" << plutoDropRisk;
                 BnetLog::event(ev.str());
             }
         }
     };
 
     using Kind = BnetPolicy::CannonBaseKind;
-    auto cannonTargetFor = [&](Kind kind)
+    auto cannonTargetFor = [&](Kind kind, bool threat)
     {
         return BnetPolicy::cannonTarget(kind,
-                                        mechThreat,
+                                        threat,
                                         bnetConfig.naturalCannons,
                                         bnetConfig.mechNaturalCannons,
                                         bnetConfig.mainCannons,
@@ -1026,26 +1174,26 @@ void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &
     auto natural = Map::getMyNatural();
     if (ourStrategy != OurStrategy::ForgeExpandGoons && natural && natural->owner == BWAPI::Broodwar->self())
     {
-        requestCannonsAtBase(natural, cannonTargetFor(Kind::Natural), "natural");
+        requestCannonsAtBase(natural, cannonTargetFor(Kind::Natural, mechThreat), "natural", mechThreat);
     }
 
     // Main mineral line, independent of the natural
     auto mainBase = Map::getMyMain();
     if (ourStrategy != OurStrategy::AntiMarineRush)
     {
-        requestCannonsAtBase(mainBase, cannonTargetFor(Kind::Main), "main");
+        requestCannonsAtBase(mainBase, cannonTargetFor(Kind::Main, mainThreat), "main", mainThreat);
     }
 
     // Every other owned base (third and later): expansion_cannons under a mech / vulture threat.
     // In the 2026-11-15 Fighting Spirit replay the third base went 13 minutes without a cannon vs. 108 vultures.
-    int expansionTarget = cannonTargetFor(Kind::Expansion);
+    int expansionTarget = cannonTargetFor(Kind::Expansion, mechThreat);
     if (expansionTarget > 0)
     {
         for (auto base : Map::getMyBases())
         {
             if (!base || base == mainBase || base == natural) continue;
             if (base->owner != BWAPI::Broodwar->self()) continue;
-            requestCannonsAtBase(base, expansionTarget, "expansion");
+            requestCannonsAtBase(base, expansionTarget, "expansion", mechThreat);
         }
     }
 }

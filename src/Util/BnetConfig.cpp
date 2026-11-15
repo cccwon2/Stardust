@@ -191,6 +191,21 @@ namespace BnetConfig
                 read(json, "pvz_pool_first_zealots", config.pvzPoolFirstZealots);
                 read(json, "pvz_allin_zealots", config.pvzAllinZealots);
                 read(json, "pvz_allin_probe_cap", config.pvzAllinProbeCap);
+                read(json, "invalid_move_guard", config.invalidMoveGuard);
+                read(json, "worker_flee_vultures", config.workerFleeVultures);
+                read(json, "worker_flee_margin_px", config.workerFleeMarginPx);
+                read(json, "worker_flee_hold_frames", config.workerFleeHoldFrames);
+                read(json, "probe_throttle_under_vultures", config.probeThrottleUnderVultures);
+                read(json, "blind_main_cannon_frame", config.blindMainCannonFrame);
+                read(json, "home_guard_dragoons", config.homeGuardDragoons);
+                read(json, "home_guard_until_frame", config.homeGuardUntilFrame);
+                read(json, "observer_emergency_priority", config.observerEmergencyPriority);
+                read(json, "mine_hold_until_observer", config.mineHoldUntilObserver);
+                read(json, "mine_hold_max_frame", config.mineHoldMaxFrame);
+                read(json, "pluto_rescout_frame", config.plutoRescoutFrame);
+                read(json, "pluto_rescout_max_frames", config.plutoRescoutMaxFrames);
+                read(json, "drop_risk_detection", config.dropRiskDetection);
+                read(json, "midgame_strategy_hold_frames", config.midgameStrategyHoldFrames);
                 read(json, "print_build_info", config.printBuildInfo);
                 read(json, "bnet_log", config.bnetLog);
 
@@ -247,6 +262,15 @@ namespace BnetConfig
         config.pvzPoolFirstZealots = std::clamp(config.pvzPoolFirstZealots, 0, 6);
         config.pvzAllinZealots = std::clamp(config.pvzAllinZealots, 0, 12);
         config.pvzAllinProbeCap = config.pvzAllinProbeCap <= 0 ? 0 : std::clamp(config.pvzAllinProbeCap, 12, 40);
+        config.workerFleeMarginPx = std::clamp(config.workerFleeMarginPx, 0, 256);
+        config.workerFleeHoldFrames = std::clamp(config.workerFleeHoldFrames, 0, 240);
+        config.blindMainCannonFrame = config.blindMainCannonFrame <= 0 ? 0 : std::clamp(config.blindMainCannonFrame, 3000, 20000);
+        config.homeGuardDragoons = std::clamp(config.homeGuardDragoons, 0, 4);
+        config.homeGuardUntilFrame = std::clamp(config.homeGuardUntilFrame, 0, 30000);
+        config.mineHoldMaxFrame = std::clamp(config.mineHoldMaxFrame, 0, 30000);
+        config.plutoRescoutFrame = config.plutoRescoutFrame <= 0 ? 0 : std::clamp(config.plutoRescoutFrame, 2000, 12000);
+        config.plutoRescoutMaxFrames = std::clamp(config.plutoRescoutMaxFrames, 240, 4800);
+        config.midgameStrategyHoldFrames = std::clamp(config.midgameStrategyHoldFrames, 0, 2400);
     }
 
     const Config &get()
@@ -327,6 +351,21 @@ namespace BnetConfig
            << " pvz_pool_first_zealots=" << config.pvzPoolFirstZealots
            << " pvz_allin_zealots=" << config.pvzAllinZealots
            << " pvz_allin_probe_cap=" << config.pvzAllinProbeCap
+           << " invalid_move_guard=" << config.invalidMoveGuard
+           << " worker_flee_vultures=" << config.workerFleeVultures
+           << " worker_flee_margin_px=" << config.workerFleeMarginPx
+           << " worker_flee_hold_frames=" << config.workerFleeHoldFrames
+           << " probe_throttle_under_vultures=" << config.probeThrottleUnderVultures
+           << " blind_main_cannon_frame=" << config.blindMainCannonFrame
+           << " home_guard_dragoons=" << config.homeGuardDragoons
+           << " home_guard_until_frame=" << config.homeGuardUntilFrame
+           << " observer_emergency_priority=" << config.observerEmergencyPriority
+           << " mine_hold_until_observer=" << config.mineHoldUntilObserver
+           << " mine_hold_max_frame=" << config.mineHoldMaxFrame
+           << " pluto_rescout_frame=" << config.plutoRescoutFrame
+           << " pluto_rescout_max_frames=" << config.plutoRescoutMaxFrames
+           << " drop_risk_detection=" << config.dropRiskDetection
+           << " midgame_strategy_hold_frames=" << config.midgameStrategyHoldFrames
            << " print_build_info=" << config.printBuildInfo
            << " bnet_log=" << config.bnetLog;
         return os.str();
