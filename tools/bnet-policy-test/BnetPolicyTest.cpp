@@ -422,6 +422,28 @@ namespace
         CHECK(pvzProbeCap(true, false, 18) == 0);
         CHECK(pvzProbeCap(true, true, 0) == 0);
         CHECK(pvzProbeCap(false, true, 18) == 0);
+
+        // Fighting Spirit: an unseen or already-finished pool is a 6-pool, not a 9-pool.
+        CHECK(pvzUnseenPoolStart(true) == 900);
+        CHECK(pvzUnseenPoolStart(false) == 1600);
+        CHECK(pvzFirstCannonFrame(true, 0, 3400) == 0);
+        CHECK(pvzFirstCannonFrame(true, 1, 3400) == 3400);
+        CHECK(pvzFirstCannonFrame(false, 0, 3400) == 3400);
+        CHECK(pvzQueueAnotherCannon(true, true) == false);
+        CHECK(pvzQueueAnotherCannon(true, false) == true);
+        CHECK(pvzQueueAnotherCannon(false, true) == true);
+
+        // Gas was 500 at 6:00 with no core, and 858 at 8:00 with no archives.
+        CHECK(pvzNextGasTech(true, 32, false, false, false, false, false) == PvzGasTech::None);
+        CHECK(pvzNextGasTech(true, 50, false, false, false, false, false) == PvzGasTech::CyberCore);
+        CHECK(pvzNextGasTech(true, 500, false, false, false, false, false) == PvzGasTech::CyberCore);
+        CHECK(pvzNextGasTech(true, 149, true, false, false, false, false) == PvzGasTech::None);
+        CHECK(pvzNextGasTech(true, 150, true, false, false, false, false) == PvzGasTech::Singularity);
+        CHECK(pvzNextGasTech(true, 150, true, true, false, false, false) == PvzGasTech::Stargate);
+        CHECK(pvzNextGasTech(true, 100, true, true, true, false, false) == PvzGasTech::Citadel);
+        CHECK(pvzNextGasTech(true, 200, true, true, true, true, false) == PvzGasTech::Archives);
+        CHECK(pvzNextGasTech(true, 858, true, true, true, true, true) == PvzGasTech::None);
+        CHECK(pvzNextGasTech(false, 858, false, false, false, false, false) == PvzGasTech::None);
     }
 
     void testCombatFix()

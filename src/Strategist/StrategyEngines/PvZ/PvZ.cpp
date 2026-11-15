@@ -37,6 +37,127 @@ namespace
         auto natural = Map::getMyNatural();
         return natural && natural->owner == BWAPI::Broodwar->enemy();
     }
+
+    // Moves probe goals above `keep` below the gas tech. Depot priority also holds buildings, so only probe
+    // goals are moved. An unlimited probe goal stays put until we already have `keep` probes.
+    void demoteProbeProductionAbove(std::map<int, std::vector<ProductionGoal>> &prioritizedProductionGoals, int keep, int newPriority)
+    {
+        int probes = Units::countAll(BWAPI::UnitTypes::Protoss_Probe);
+        if (Strategist::getWorkerScoutStatus() != Strategist::WorkerScoutStatus::Unstarted && !Strategist::isWorkerScoutComplete())
+        {
+            probes--;
+        }
+
+        prioritizedProductionGoals[newPriority];
+        prioritizedProductionGoals[PRIORITY_WORKERS];
+        prioritizedProductionGoals[PRIORITY_DEPOTS];
+        auto &newGoals = prioritizedProductionGoals[newPriority];
+
+        auto demote = [&](std::vector<ProductionGoal> &workerGoals)
+        {
+            for (auto it = workerGoals.begin(); it != workerGoals.end();)
+            {
+                auto probeGoal = std::get_if<UnitProductionGoal>(&*it);
+                if (!probeGoal || !probeGoal->unitType().isWorker())
+                {
+                    ++it;
+                    continue;
+                }
+                if (probes < keep)
+                {
+                    int count = probeGoal->countToProduce();
+                    if (count < 0)
+                    {
+                        ++it;
+                        continue;
+                    }
+                    probes += count;
+                    if (probes > keep)
+                    {
+                        int kept = keep - (probes - count);
+                        probeGoal->setCountToProduce(kept);
+                        newGoals.emplace_back(std::in_place_type<UnitProductionGoal>,
+                                              probeGoal->requester,
+                                              BWAPI::UnitTypes::Protoss_Probe,
+                                              probes - keep,
+                                              probeGoal->getProducerLimit(),
+                                              probeGoal->getLocation());
+                    }
+                    ++it;
+                    continue;
+                }
+                newGoals.push_back(std::move(*it));
+                it = workerGoals.erase(it);
+            }
+        };
+
+        demote(prioritizedProductionGoals[PRIORITY_WORKERS]);
+        demote(prioritizedProductionGoals[PRIORITY_DEPOTS]);
+    }
+
+    void spendSurplusGas(std::map<int, std::vector<ProductionGoal>> &prioritizedProductionGoals)
+    {
+        if (!BnetConfig::get().pvzAntiAllinFix) return;
+
+        bool haveCore = Units::countAll(BWAPI::UnitTypes::Protoss_Cybernetics_Core) > 0;
+        bool range = BWAPI::Broodwar->self()->getUpgradeLevel(BWAPI::UpgradeTypes::Singularity_Charge) > 0
+                     || Units::isBeingUpgradedOrResearched(BWAPI::UpgradeTypes::Singularity_Charge);
+        bool haveStargate = Units::countAll(BWAPI::UnitTypes::Protoss_Stargate) > 0;
+        bool haveCitadel = Units::countAll(BWAPI::UnitTypes::Protoss_Citadel_of_Adun) > 0;
+        bool haveArchives = Units::countAll(BWAPI::UnitTypes::Protoss_Templar_Archives) > 0;
+
+        auto tech = BnetPolicy::pvzNextGasTech(true,
+                                               BWAPI::Broodwar->self()->gas(),
+                                               haveCore,
+                                               range,
+                                               haveStargate,
+                                               haveCitadel,
+                                               haveArchives);
+        if (tech == BnetPolicy::PvzGasTech::None) return;
+
+        // Below cannons and the probes we still need. Further probes move under this so the building is paid for.
+        const int priority = PRIORITY_BASEDEFENSE;
+        demoteProbeProductionAbove(prioritizedProductionGoals, 16, PRIORITY_NORMAL);
+
+        switch (tech)
+        {
+            case BnetPolicy::PvzGasTech::CyberCore:
+                prioritizedProductionGoals[priority].emplace_back(std::in_place_type<UnitProductionGoal>,
+                                                                  "pvz-gas",
+                                                                  BWAPI::UnitTypes::Protoss_Cybernetics_Core,
+                                                                  1,
+                                                                  1);
+                break;
+            case BnetPolicy::PvzGasTech::Singularity:
+                prioritizedProductionGoals[priority].emplace_back(std::in_place_type<UpgradeProductionGoal>,
+                                                                  "pvz-gas",
+                                                                  BWAPI::UpgradeTypes::Singularity_Charge);
+                break;
+            case BnetPolicy::PvzGasTech::Stargate:
+                prioritizedProductionGoals[priority].emplace_back(std::in_place_type<UnitProductionGoal>,
+                                                                  "pvz-gas",
+                                                                  BWAPI::UnitTypes::Protoss_Stargate,
+                                                                  1,
+                                                                  1);
+                break;
+            case BnetPolicy::PvzGasTech::Citadel:
+                prioritizedProductionGoals[priority].emplace_back(std::in_place_type<UnitProductionGoal>,
+                                                                  "pvz-gas",
+                                                                  BWAPI::UnitTypes::Protoss_Citadel_of_Adun,
+                                                                  1,
+                                                                  1);
+                break;
+            case BnetPolicy::PvzGasTech::Archives:
+                prioritizedProductionGoals[priority].emplace_back(std::in_place_type<UnitProductionGoal>,
+                                                                  "pvz-gas",
+                                                                  BWAPI::UnitTypes::Protoss_Templar_Archives,
+                                                                  1,
+                                                                  1);
+                break;
+            case BnetPolicy::PvzGasTech::None:
+                break;
+        }
+    }
 }
 
 void PvZ::initialize(std::vector<std::shared_ptr<Play>> &plays, bool transitioningFromRandom, const std::string &openingOverride)
@@ -795,6 +916,13 @@ void PvZ::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
 
             break;
         }
+    }
+
+    // FFE and the early midgame were floating gas (500 by 6:00, 858 by 8:00) while the cybernetics core,
+    // dragoon range, stargate, citadel and templar archives were missing. Queue the next one of those.
+    if (isFFE() || ourStrategy == OurStrategy::MidGame)
+    {
+        spendSurplusGas(prioritizedProductionGoals);
     }
 }
 

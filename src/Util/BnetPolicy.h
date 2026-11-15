@@ -469,6 +469,57 @@ namespace BnetPolicy
         return (enabled && allIn && cap > 0) ? cap : 0;
     }
 
+    // Spawning pool we never saw under construction. 1600 is a 9-pool. A 6-pool starts the pool around
+    // frame 900 (fifth drone finishes at 300, then 200 minerals). A cannon timed for the 9-pool finishes
+    // after those lings are already in the mineral line.
+    constexpr int PvzSixPoolStartFrame = 900;
+
+    inline int pvzUnseenPoolStart(bool enabled)
+    {
+        return enabled ? PvzSixPoolStartFrame : 1600;
+    }
+
+    // First wall cannon is requested immediately so it starts when the forge finishes. Photon cannon build
+    // time is 750 frames. Scheduling the cannon to finish on the predicted arrival leaves no slack when the
+    // build command does not stick.
+    inline int pvzFirstCannonFrame(bool enabled, int cannonsStarted, int scheduledFrame)
+    {
+        if (enabled && cannonsStarted < 1) return 0;
+        return scheduledFrame;
+    }
+
+    // One probe builds wall cannons. Another cannon spot is queued only after that cannon has started,
+    // so further probes stay on minerals instead of standing on the approach.
+    inline bool pvzQueueAnotherCannon(bool enabled, bool unstartedCannonAlreadyQueued)
+    {
+        if (!enabled) return true;
+        return !unstartedCannonAlreadyQueued;
+    }
+
+    // Next gas sink, in prerequisite order. Thresholds are the gas the item costs. The cybernetics core
+    // itself costs no gas; it is the dragoon-range building and is queued once gas income has started.
+    enum class PvzGasTech
+    {
+        None,
+        CyberCore,
+        Singularity,
+        Stargate,
+        Citadel,
+        Archives
+    };
+
+    inline PvzGasTech pvzNextGasTech(bool enabled, int gas, bool haveCore, bool rangeStartedOrDone, bool haveStargate,
+                                     bool haveCitadel, bool haveArchives)
+    {
+        if (!enabled) return PvzGasTech::None;
+        if (!haveCore) return gas >= 50 ? PvzGasTech::CyberCore : PvzGasTech::None;
+        if (!rangeStartedOrDone) return gas >= 150 ? PvzGasTech::Singularity : PvzGasTech::None;
+        if (!haveStargate) return gas >= 150 ? PvzGasTech::Stargate : PvzGasTech::None;
+        if (!haveCitadel) return gas >= 100 ? PvzGasTech::Citadel : PvzGasTech::None;
+        if (!haveArchives) return gas >= 200 ? PvzGasTech::Archives : PvzGasTech::None;
+        return PvzGasTech::None;
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Micro latency (PvT combat fix)
     // ---------------------------------------------------------------------------------------------

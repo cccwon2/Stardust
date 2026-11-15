@@ -34,6 +34,16 @@ namespace Builder
             // for the building to appear
             if (building.builder->bwapiUnit->isConstructing()) return;
 
+            // A build command was already accepted. A later move cancels it before the building appears
+            // (Fighting Spirit: cannon order at 2:16, move at 2:17, construction never started). Wait until
+            // the building shows up. The success counter still advances so a command that never produces a
+            // building is dropped after two seconds by the check in update().
+            if (building.buildCommandSuccessFrames > 0)
+            {
+                building.buildCommandSuccessFrames++;
+                return;
+            }
+
             // If we are close to the build position and want to build now, issue the build command
             int dist = Geo::EdgeToEdgeDistance(building.builder->type, building.builder->lastPosition, building.type, building.getPosition());
             if (dist <= 24 && building.desiredStartFrame - currentFrame <= BWAPI::Broodwar->getRemainingLatencyFrames())
