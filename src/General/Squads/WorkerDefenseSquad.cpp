@@ -10,6 +10,9 @@
 
 #include "DebugFlag_UnitOrders.h"
 
+#include <algorithm>
+#include <cmath>
+
 std::vector<std::pair<MyWorker, Unit>> WorkerDefenseSquad::selectTargets(std::set<Unit> &enemyUnits)
 {
     std::vector<std::pair<MyWorker, Unit>> result;
@@ -274,6 +277,45 @@ bool WorkerDefenseSquad::vultureFleeActive(bool hasCannonInMineralLine) const
     return BWAPI::Broodwar->enemy() && BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Terran;
 }
 
+namespace
+{
+    // Clamp a pixel position to the map and, if needed, search nearby walkable walk-tiles.
+    // Corner mains (e.g. KnockOut (7,7)) used to produce off-map flee targets that became
+    // Positions::Invalid / (4095,4095) after pathing — counted as invalid_moves while probes died.
+    BWAPI::Position clampFleePosition(BWAPI::Position pos)
+    {
+        auto game = BWAPI::BroodwarPtr;
+        if (!game) return BWAPI::Positions::Invalid;
+
+        const int maxX = std::max(0, game->mapWidth() * 32 - 1);
+        const int maxY = std::max(0, game->mapHeight() * 32 - 1);
+        pos.x = std::clamp(pos.x, 0, maxX);
+        pos.y = std::clamp(pos.y, 0, maxY);
+
+        BWAPI::WalkPosition wp(pos);
+        auto walkableAt = [&](BWAPI::WalkPosition w) -> BWAPI::Position
+        {
+            if (!w.isValid() || !game->isWalkable(w)) return BWAPI::Positions::Invalid;
+            return BWAPI::Position(w) + BWAPI::Position(4, 4);
+        };
+
+        if (auto p = walkableAt(wp); p.isValid()) return p;
+
+        for (int r = 1; r <= 24; r++)
+        {
+            for (int dx = -r; dx <= r; dx++)
+            {
+                for (int dy = -r; dy <= r; dy++)
+                {
+                    if (std::max(std::abs(dx), std::abs(dy)) != r) continue;
+                    if (auto p = walkableAt(BWAPI::WalkPosition(wp.x + dx, wp.y + dy)); p.isValid()) return p;
+                }
+            }
+        }
+        return BWAPI::Positions::Invalid;
+    }
+}
+
 BWAPI::Position WorkerDefenseSquad::fleeDestination(const MyWorker &worker, const Unit &threat) const
 {
     // Prefer the other early base (main <-> natural) if it has a completed nexus and no enemy units
@@ -283,7 +325,8 @@ BWAPI::Position WorkerDefenseSquad::fleeDestination(const MyWorker &worker, cons
         if (other->owner != BWAPI::Broodwar->self()) continue;
         if (!other->resourceDepot || !other->resourceDepot->completed) continue;
         if (!Units::enemyAtBase(other).empty()) continue;
-        return other->getPosition();
+        auto dest = clampFleePosition(other->getPosition());
+        if (dest.isValid()) return dest;
     }
 
     // Otherwise run directly away from the vulture, quantized to a 4-tile grid so the target does not change every frame
@@ -295,7 +338,15 @@ BWAPI::Position WorkerDefenseSquad::fleeDestination(const MyWorker &worker, cons
         BWAPI::Position away(worker->lastPosition.x + (int)(delta.x * 256.0 / length),
                              worker->lastPosition.y + (int)(delta.y * 256.0 / length));
         away = BWAPI::Position(((away.x / 128) * 128) + 64, ((away.y / 128) * 128) + 64);
-        if (away.isValid() && BWAPI::Broodwar->isWalkable(BWAPI::WalkPosition(away))) return away;
+        auto dest = clampFleePosition(away);
+        if (dest.isValid()) return dest;
+    }
+
+    // Corner / blocked flee: pull toward the mineral line center (still on the map) before giving up
+    if (base && base->mineralLineCenter.isValid())
+    {
+        auto dest = clampFleePosition(base->mineralLineCenter);
+        if (dest.isValid()) return dest;
     }
 
     return BWAPI::Positions::Invalid;
@@ -330,12 +381,14 @@ void WorkerDefenseSquad::flee(const MyWorker &worker, const Unit &threat)
             worker->gather(furthestPatch);
             return;
         }
-        dest = base->getPosition();
+        dest = base ? clampFleePosition(base->getPosition()) : BWAPI::Positions::Invalid;
+        if (!dest.isValid()) return;
     }
 
 #if DEBUG_UNIT_ORDERS
     CherryVis::log(worker->id) << "Fleeing vulture to " << BWAPI::WalkPosition(dest);
 #endif
+    if (!dest.isValid()) return;
     worker->moveTo(dest);
 }
 
