@@ -217,6 +217,9 @@ namespace BnetConfig
                 read(json, "arrived_move_tolerance_px", config.arrivedMoveTolerancePx);
                 read(json, "resource_fail_backoff_frames", config.resourceFailBackoffFrames);
                 read(json, "supply_drop_event", config.supplyDropEvent);
+                read(json, "stacked_mineral_identity_fix", config.stackedMineralIdentityFix);
+                read(json, "mineral_assignment_fix", config.mineralAssignmentFix);
+                read(json, "mining_assignment_log", config.miningAssignmentLog);
                 read(json, "print_build_info", config.printBuildInfo);
                 read(json, "bnet_log", config.bnetLog);
 
@@ -396,6 +399,9 @@ namespace BnetConfig
            << " arrived_move_tolerance_px=" << config.arrivedMoveTolerancePx
            << " resource_fail_backoff_frames=" << config.resourceFailBackoffFrames
            << " supply_drop_event=" << config.supplyDropEvent
+           << " stacked_mineral_identity_fix=" << config.stackedMineralIdentityFix
+           << " mineral_assignment_fix=" << config.mineralAssignmentFix
+           << " mining_assignment_log=" << config.miningAssignmentLog
            << " print_build_info=" << config.printBuildInfo
            << " bnet_log=" << config.bnetLog;
         return os.str();

@@ -23,6 +23,9 @@ The effective values (after clamping and derived defaults) are written to the `[
 | `safe_bnet_mining` | `true` | Bypasses the MiningOptimizationV2 optimized initial split, start-of-mining and return-of-resource path optimizations (all frame-exact resends). Workers use plain `gather()` / `returnCargo()` only, and are never re-ordered while already moving to, waiting at, or mining their patch. All mining workers are in simple gather mode, so the resource command guards (below) apply to all of them. |
 | `stacked_mineral_fallback` | `true` | Detects bases with stacked/overlapping mineral patches (same tile or centers < 24px apart) and uses simple gather mode there even when `safe_bnet_mining` is off. Also recovers stuck workers (see "Stuck worker recovery" below). |
 | `stuck_worker_frames` | `48` | Stuck detection threshold (clamped 12-1000). |
+| `stacked_mineral_identity_fix` | `true` | Registers every mineral field by unit ID instead of one resource per build tile; bases link each field once (see "Stacked-mineral mining"). Applied at game start. |
+| `mineral_assignment_fix` | `true` | Patch assignment accepts a patch touching the depot (score 0), ties go to the lower ID; idle simple-gather miners near their base are not re-sent to the depot. |
+| `mining_assignment_log` | `true` | `[MINING]` diagnostic lines (registry, base patches, worker snapshots at 0:10 / 0:30 / 1:00, assignment failures). |
 | `max_orders_per_frame` | `0` | Cap on worker resource orders (gather / return cargo / resource right-click) per frame. `0` = unlimited. |
 | `min_command_interval_frames` | `-1` | Minimum frames between identical commands to the same unit. `-1` = auto: `maxLatency + 2` when the highest `getLatencyFrames()` seen this game is `> 4`, otherwise off (the maximum is latched because Remastered reported 5 at game start and 3 later, which used to switch the guard off mid-game). Also used as the interval of `combat_move_guard` (see "PvT vs. mech" below). Applies only to workers in simple gather mode: same-target gather / return cargo / resource right-click, and same-target mining moves issued directly by `Workers::issueOrders` (`Workers::miningMoveTo`). Combat units, scouting, fleeing no-go areas, building and other worker moves keep upstream behavior. |
 | `enable_auto_gg` | `false` | Enables the surrender logic (send "gg" and leave). Previously this was always on in `VS_HUMAN` builds. The surrender condition itself is unchanged and strict: no probes, no nexus or < 50 minerals, no mobile combat unit, and an enemy combat unit at one of our bases. |
@@ -343,7 +346,49 @@ DefendBase scheduling (only while the main army is attacking).
 - Cause: the main minerals (8 patches) are stacked on one spot directly below the start location. The base finder (`3rdparty/BWEM/src/BaseFinder.cpp`) blocks depot tiles near minerals, so it places the main base 6 tiles away. BWEM only matches a starting location to a base within 3 tiles (`max_tiles_between_StartingLocation_and_its_AssignedBase`), so the start location gets no base, `Map::getMyMain()` is null and `BuildingPlacement::initialize` crashes.
 - Fix: `MapImpl::FindBasesForStartingLocations` now falls back to the nearest not-yet-starting base within 12 tiles (same area preferred) and moves it to the real start location. Maps where the normal 3-tile match works are unchanged.
 - Log: `[EVENT] map_init_warning bwem_start_bases_incomplete` if some start location still has no base, and `[EVENT] map_init_error no_starting_main ...` if our own main is still missing (the bot would crash right after this line).
-- Not verified in game yet: mining from stacked minerals that touch the nexus.
+- Mining from these stacked minerals: see the next section.
+
+## Stacked-mineral mining (2026-11-15 OdysseyRE 2.0 game, build `bnet-pluto@0264e7aa`)
+
+- Symptom: the game starts normally (`[START]`, `[OURS]`, `[ENEMY]`), but the probes wander around the nexus instead of
+  mining. The log at 0:39 (944 frames) has `res_attempts=2 res_issued=2 res_failed=0`, all `res_blocked_*` at 0,
+  `orders_worker=232`, `stuck_attempts=0`.
+- Causes in the code:
+  1. `Units` kept one `Resource` per build tile (`std::map<TilePosition, Resource>`). All further mineral fields on the
+     same tile were dropped at registration, and `Base` linked the same resource once per BWEM field.
+  2. `Workers::assignMineralPatch` searched the second worker of a patch with `bestScore = 0` and a strict `score >
+     bestScore`. A patch touching the depot has distance score 0, so it never got a second worker (and with the stack
+     merged into one resource, only one probe was assigned at all).
+  3. A miner without a patch near its base hit "worker has nothing to do" in `issueOrders`, which cleared its state and
+     re-sent it to the base center every few frames (the `orders_worker` volume). Stuck recovery only watches workers
+     that have a patch, so it never ran (`stuck_attempts=0`).
+- Fixes (each behind its own switch, read at game start):
+  - `stacked_mineral_identity_fix` (`true`): resources are kept per tile as a list; mineral fields are matched by unit ID
+    (`BnetPolicy::matchResource`), mined-out detection is per field, `ResourceImpl::getBwapiUnitIfVisible` never
+    substitutes another field of the same tile, and `Base` links each BWEM field by `Mineral::Unit()` without
+    duplicates (plus stacked fields on a linked tile that BWEM did not list, if they have more than 8 minerals).
+    `false` restores the upstream one-resource-per-tile registry.
+  - `mineral_assignment_fix` (`true`): the first candidate patch is always accepted and equal scores are broken by the
+    lower unit ID (`BnetPolicy::mineralScoreBetter`); an idle simple-gather miner near its base is no longer re-sent to
+    the depot, it only clears its state and gets a patch on the next assignment pass (`BnetPolicy::sendIdleMinerToDepot`).
+  - `mining_assignment_log` (`true`): writes `[MINING]` lines (below).
+- `[MINING]` lines:
+  - `registry identity_fix=.. assignment_fix=.. mineral_units=.. registered=.. dropped=.. stacked_tiles=.. max_stack=..`
+    at frame 0. `dropped > 0` means fields were merged (upstream registry).
+  - `base=main|natural tile=.. depot=.. bwem_minerals=.. dup_skipped=.. siblings_added=.. stacked=.. patches=.. unique=..
+    stacked_tiles=.. load=<patch id>:<workers>,...` at frame 0. On a healthy stacked main `patches == unique`.
+  - `snapshot base=main miners=.. unassigned=.. target_mismatch=.. ... w<worker>=<patch id>/<order target id>/<order>[/c]`
+    at frames 240, 720 and 1440 (0:10, 0:30, 1:00). `target_mismatch` counts miners whose mineral order target differs from
+    the assigned patch (Brood War may switch a waiting worker to a free nearby field; informational).
+  - `assign_fail n=.. worker=.. reason=all_full|no_patches base=.. available=.. ...` when a miner at its base gets no patch
+    (first 5, then every 500th), and `unassigned_miner worker=.. frames=.. base=.. order=..` once per worker when it has
+    waited `stuck_worker_frames` without a patch.
+- New counters on `[APM]` / `[END]`: `mining_assign_ok`, `mining_assign_fail` (per assignment call, so a waiting worker
+  counts every frame), `mining_idle_holds` / `mining_idle_depot_moves` (idle-miner frames held vs. re-sent to the depot),
+  `mining_unassigned_long`.
+- Verified: policy unit tests (assignment simulation: one merged resource at distance 0 gives 1 of 4 probes a patch
+  upstream, 2 with the fix; 8 fields at distance 0 take 8 of 12 probes upstream, 12 with the fix), config loader test and
+  g++ syntax checks. Not verified: Windows build and an OdysseyRE game with the new build.
 
 ## Non-ASCII opponent names (2026-11-15)
 

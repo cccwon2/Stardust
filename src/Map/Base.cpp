@@ -87,11 +87,24 @@ Base::Base(BWAPI::TilePosition tile, const BWEM::Base *bwemBase)
         , center(BWAPI::Position(tile) + BWAPI::Position(64, 48))
         , bwemArea(bwemBase->GetArea())
 {
+    bool identityFix = Units::stackedMineralIdentityFix();
+    std::set<const ResourceImpl *> linkedPatches;
     for (const auto &mineralPatch : bwemBase->Minerals())
     {
-        auto resource = Units::resourceAt(mineralPatch->TopLeft());
+        bwemMineralCount++;
+
+        // With stacked_mineral_identity_fix, link the resource of this exact field (by unit ID) and never link the same
+        // resource twice. Upstream looked up the tile, so stacked fields all resolved to one resource that was linked
+        // once per field, inflating the patch count used for worker capacity.
+        Resource resource = identityFix ? Units::resourceFor(mineralPatch->Unit()) : nullptr;
+        if (!resource) resource = Units::resourceAt(mineralPatch->TopLeft());
         if (resource)
         {
+            if (identityFix && !linkedPatches.insert(resource.get()).second)
+            {
+                duplicateMineralLinks++;
+                continue;
+            }
             _mineralPatches.emplace_back(resource);
         }
 #if LOGGING_ENABLED
@@ -100,6 +113,23 @@ Base::Base(BWAPI::TilePosition tile, const BWEM::Base *bwemBase)
             Log::Get() << "ERROR: Cannot find our resource unit for mineral field @ " << mineralPatch->TopLeft();
         }
 #endif
+    }
+
+    // Stacked fields on a linked tile that BWEM did not list for this base (BWEM blocking minerals have <= 8 minerals)
+    if (identityFix)
+    {
+        std::vector<Resource> siblings;
+        for (const auto &patch : _mineralPatches)
+        {
+            for (const auto &other : Units::resourcesAt(patch->tile))
+            {
+                if (!other->isMinerals || other->initialAmount <= 8) continue;
+                if (!linkedPatches.insert(other.get()).second) continue;
+                siblings.push_back(other);
+            }
+        }
+        stackedSiblingsAdded = (int)siblings.size();
+        _mineralPatches.insert(_mineralPatches.end(), siblings.begin(), siblings.end());
     }
 
     for (const auto &geyser : bwemBase->Geysers())
@@ -120,7 +150,8 @@ Base::Base(BWAPI::TilePosition tile, const BWEM::Base *bwemBase)
     // The mineral patch and geyser vectors will be in a random order based on the memory layout, so sort them for better determinism
     auto cmpResource = [](const Resource &a, const Resource &b)
     {
-        return a->tile < b->tile;
+        if (a->tile != b->tile) return a->tile < b->tile;
+        return a->id < b->id;   // stacked fields on one tile
     };
     std::sort(_mineralPatches.begin(), _mineralPatches.end(), cmpResource);
     std::sort(_geysersOrRefineries.begin(), _geysersOrRefineries.end(), cmpResource);

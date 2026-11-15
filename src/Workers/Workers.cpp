@@ -10,6 +10,7 @@
 #include "Strategist.h"
 #include "BnetConfig.h"
 #include "BnetPolicy.h"
+#include "BnetLog.h"
 
 #include "DebugFlag_UnitOrders.h"
 #include "MiningOptimizationV2/DataModel/MapData.h"
@@ -180,6 +181,65 @@ namespace Workers
         std::map<Base *, bool> stackedMineralBases;   // Cache: whether a base has stacked / overlapping mineral patches
         BnetRecoveryStats recoveryStats;
 
+        int availableMineralAssignmentsAtBase(Base *base, int workersPerPatch = 2);
+        int availableMineralAssignmentsAtBaseForLog(Base *base) { return availableMineralAssignmentsAtBase(base, 2); }
+
+        // Stacked mineral / assignment diagnostics
+        BnetMiningStats miningStats;
+        std::map<MyWorker, int> unassignedSince;      // Miner near its base without a patch since this frame
+        int miningFailEvents = 0;                     // [MINING] assign_fail lines written (rate limited)
+
+        bool rateLimitedEvent(int &counter)
+        {
+            counter++;
+            return counter <= 5 || counter % 500 == 0;
+        }
+
+        // Patch count, unique resources, workers per patch and IDs of a base, for [MINING] lines
+        std::string describeBasePatches(Base *base)
+        {
+            std::ostringstream os;
+            std::set<const ResourceImpl *> unique;
+            std::map<BWAPI::TilePosition, int> perTile;
+            for (const auto &patch : base->mineralPatches())
+            {
+                if (unique.insert(patch.get()).second) perTile[patch->tile]++;
+            }
+            int stackedTiles = 0;
+            for (auto &[tile, count] : perTile)
+            {
+                if (count > 1) stackedTiles++;
+            }
+            os << "patches=" << base->mineralPatchCount()
+               << " unique=" << unique.size()
+               << " stacked_tiles=" << stackedTiles;
+
+            os << " load=";
+            bool first = true;
+            for (const auto &patch : base->mineralPatches())
+            {
+                auto it = mineralPatchWorkers.find(patch);
+                os << (first ? "" : ",") << patch->id << ":" << (it == mineralPatchWorkers.end() ? 0 : it->second.size());
+                first = false;
+            }
+            return os.str();
+        }
+
+        void logAssignFailure(const MyWorker &worker, Base *base)
+        {
+            if (!rateLimitedEvent(miningFailEvents)) return;
+
+            const char *reason = base->mineralPatches().empty() ? "no_patches" : "all_full";
+            std::ostringstream os;
+            os << "assign_fail n=" << miningFailEvents
+               << " worker=" << worker->id
+               << " reason=" << reason
+               << " base=" << base->getTilePosition()
+               << " available=" << availableMineralAssignmentsAtBaseForLog(base)
+               << " " << describeBasePatches(base);
+            BnetLog::mining(os.str());
+        }
+
         // Whether a base has mineral patches on the same tile or overlapping each other (fast-infinite / modified melee maps)
         bool hasStackedMinerals(Base *base)
         {
@@ -345,6 +405,109 @@ namespace Workers
         int mineralWorkerCount;
         std::pair<int, int> gasWorkerCount;
 
+        // Miner near its base that could not get a patch: logged once when it has waited stuck_worker_frames
+        void trackUnassignedMiner(const MyWorker &worker, Base *base, bool assigned)
+        {
+            if (assigned)
+            {
+                unassignedSince.erase(worker);
+                return;
+            }
+
+            auto it = unassignedSince.try_emplace(worker, currentFrame).first;
+            if (currentFrame - it->second != BnetConfig::get().stuckWorkerFrames) return;
+
+            miningStats.unassignedLong++;
+            std::ostringstream os;
+            os << "unassigned_miner worker=" << worker->id
+               << " frames=" << (currentFrame - it->second)
+               << " base=" << base->getTilePosition()
+               << " order=" << worker->bwapiUnit->getOrder().getName();
+            BnetLog::mining(os.str());
+        }
+
+        // [MINING] lines at game start: resource registry and the patches linked to our main / natural
+        void logMiningInit()
+        {
+            auto &cfg = BnetConfig::get();
+            auto &rs = Units::resourceRegistryStats();
+            {
+                std::ostringstream os;
+                os << "registry identity_fix=" << rs.identityFix
+                   << " assignment_fix=" << cfg.mineralAssignmentFix
+                   << " mineral_units=" << rs.mineralUnits
+                   << " registered=" << rs.registeredMinerals
+                   << " dropped=" << rs.droppedMinerals
+                   << " stacked_tiles=" << rs.stackedTiles
+                   << " max_stack=" << rs.maxStack;
+                BnetLog::mining(os.str());
+            }
+
+            auto logBase = [](const char *label, Base *base)
+            {
+                if (!base) return;
+                std::ostringstream os;
+                os << "base=" << label
+                   << " tile=" << base->getTilePosition()
+                   << " depot=" << (base->resourceDepot ? 1 : 0)
+                   << " bwem_minerals=" << base->bwemMineralCount
+                   << " dup_skipped=" << base->duplicateMineralLinks
+                   << " siblings_added=" << base->stackedSiblingsAdded
+                   << " stacked=" << hasStackedMinerals(base)
+                   << " " << describeBasePatches(base);
+                BnetLog::mining(os.str());
+            };
+            logBase("main", Map::getMyMain());
+            logBase("natural", Map::getMyNatural());
+        }
+
+        // [MINING] snapshot of the miners at our main: assigned patch ID / actual order target ID / order per worker
+        void logMiningSnapshot()
+        {
+            auto base = Map::getMyMain();
+            if (!base) return;
+
+            int miners = 0;
+            int unassigned = 0;
+            int targetMismatch = 0;
+            int listed = 0;
+            std::ostringstream workers;
+            auto baseIt = baseWorkers.find(base);
+            if (baseIt != baseWorkers.end())
+            {
+                for (const auto &worker : baseIt->second)
+                {
+                    auto jobIt = workerJob.find(worker);
+                    if (jobIt == workerJob.end() || jobIt->second != Job::Minerals) continue;
+                    miners++;
+
+                    auto patchIt = workerMineralPatch.find(worker);
+                    Resource patch = patchIt == workerMineralPatch.end() ? nullptr : patchIt->second;
+                    if (!patch) unassigned++;
+
+                    auto target = worker->bwapiUnit->getOrderTarget();
+                    int targetId = target ? target->getID() : -1;
+                    if (patch && target && target->getType().isMineralField() && targetId != patch->id) targetMismatch++;
+
+                    if (listed++ < 24)
+                    {
+                        workers << " w" << worker->id << "=";
+                        if (patch) workers << patch->id; else workers << "-";
+                        workers << "/" << targetId << "/" << worker->bwapiUnit->getOrder().getName();
+                        if (worker->bwapiUnit->isCarryingMinerals()) workers << "/c";
+                    }
+                }
+            }
+
+            std::ostringstream os;
+            os << "snapshot base=main miners=" << miners
+               << " unassigned=" << unassigned
+               << " target_mismatch=" << targetMismatch
+               << " " << describeBasePatches(base)
+               << workers.str();
+            BnetLog::mining(os.str());
+        }
+
         int desiredRefineryWorkers(Base *base, BWAPI::TilePosition refineryTile)
         {
             if (base && base->gasRequiresFourWorkers(refineryTile))
@@ -390,11 +553,12 @@ namespace Workers
             stuckWorkerState.erase(unit);
             lastRecoveryFrame.erase(unit);
             simpleGatherWorkers.erase(unit);
+            unassignedSince.erase(unit);
             removeFromResource(unit, workerMineralPatch, mineralPatchWorkers);
             removeFromResource(unit, workerRefinery, refineryWorkers);
         }
 
-        int availableMineralAssignmentsAtBase(Base *base, int workersPerPatch = 2)
+        int availableMineralAssignmentsAtBase(Base *base, int workersPerPatch)
         {
             if (!base || base->owner != BWAPI::Broodwar->self()) return 0;
             if (!base->resourceDepot) return 0;
@@ -578,11 +742,14 @@ namespace Workers
         // We only call this when the worker is close to the base depot, so we can assume minimal pathing issues
         Resource assignMineralPatch(const MyWorker &unit)
         {
-            if (!workerBase[unit]) return nullptr;
+            auto base = workerBase[unit];
+            if (!base) return nullptr;
+
+            bool fix = BnetConfig::get().mineralAssignmentFix;
 
             // First scan to figure out if there are any patches with no workers assigned
             bool patchWithoutWorkers = false;
-            for (const auto &mineralPatch : workerBase[unit]->mineralPatches())
+            for (const auto &mineralPatch : base->mineralPatches())
             {
                 if (mineralPatchWorkers[mineralPatch].empty())
                 {
@@ -594,10 +761,14 @@ namespace Workers
             // Now scan the patches and score them based on how quickly a single worker gathers from it (lower is faster)
             // If we have a patch without workers, we choose the patch without workers with the lowest score
             // If not, we choose the available patch with the highest score, since the second worker will help this one the most
+            // With mineral_assignment_fix a patch with score 0 (touching the depot) is accepted and ties go to the lower ID,
+            // see BnetPolicy::mineralScoreBetter
             int bestScore = (patchWithoutWorkers ? INT_MAX : 0);
             Resource best = nullptr;
-            for (const auto &mineralPatch : workerBase[unit]->mineralPatches())
+            for (const auto &mineralPatch : base->mineralPatches())
             {
+                if (fix && mineralPatch->destroyed) continue;
+
                 // Skip this patch if it isn't available
                 if (mineralPatchWorkers[mineralPatch].size() != (patchWithoutWorkers ? 0 : 1)) continue;
 
@@ -610,11 +781,12 @@ namespace Workers
                 }
                 else
                 {
-                    score = mineralPatch->getDistance(BWAPI::UnitTypes::Protoss_Nexus, workerBase[unit]->getPosition());
+                    score = mineralPatch->getDistance(BWAPI::UnitTypes::Protoss_Nexus, base->getPosition());
                 }
 
                 // Update the best result if needed
-                if ((patchWithoutWorkers && score < bestScore) || (!patchWithoutWorkers && score > bestScore))
+                if (BnetPolicy::mineralScoreBetter(fix, best != nullptr, patchWithoutWorkers, score, bestScore,
+                                                   mineralPatch->id, best ? best->id : INT_MAX))
                 {
                     bestScore = score;
                     best = mineralPatch;
@@ -625,6 +797,12 @@ namespace Workers
             {
                 workerMineralPatch[unit] = best;
                 mineralPatchWorkers[best].insert(unit);
+                miningStats.assignOk++;
+            }
+            else
+            {
+                miningStats.assignFail++;
+                logAssignFailure(unit, base);
             }
 
             return best;
@@ -733,6 +911,14 @@ namespace Workers
         simpleGatherWorkers.clear();
         stackedMineralBases.clear();
         recoveryStats = BnetRecoveryStats();
+        miningStats = BnetMiningStats();
+        unassignedSince.clear();
+        miningFailEvents = 0;
+    }
+
+    const BnetMiningStats &bnetMiningStats()
+    {
+        return miningStats;
     }
 
     int bnetStuckReassignments()
@@ -795,6 +981,10 @@ namespace Workers
                 gasWorkerCount.first++;
             }
         };
+
+        // [MINING] diagnostics (mining_assignment_log): registry / base patches at start, worker snapshots at 0:10, 0:30, 1:00
+        if (currentFrame == 0) logMiningInit();
+        if (currentFrame == 240 || currentFrame == 720 || currentFrame == 1440) logMiningSnapshot();
 
         // Special case on frame 0: try to optimize for earliest possible seventh mineral returned
         if (currentFrame == 0 && initialSplitState.empty())
@@ -895,6 +1085,7 @@ namespace Workers
                 {
                     auto mineralPatch = assignMineralPatch(worker);
                     countMineralWorker(worker, mineralPatch);
+                    trackUnassignedMiner(worker, base, mineralPatch != nullptr);
 
 #if CVIS_LOG_WORKER_ASSIGNMENTS
                     if (mineralPatch)
@@ -1227,7 +1418,17 @@ namespace Workers
 #if DEBUG_UNIT_ORDERS
                     CherryVis::log(worker->id) << "Worker has nothing to do, clearing state";
 #endif
-                    miningMoveTo(worker, base->getPosition(), simpleGather);
+                    // Upstream re-sent the worker to the depot center here, which on a stacked-mineral main (no free patch
+                    // for most probes) made them circle the nexus. The worker is within 200px of its base already.
+                    if (BnetPolicy::sendIdleMinerToDepot(BnetConfig::get().mineralAssignmentFix, simpleGather))
+                    {
+                        miningStats.idleDepotMoves++;
+                        miningMoveTo(worker, base->getPosition(), simpleGather);
+                    }
+                    else
+                    {
+                        miningStats.idleHolds++;
+                    }
                     break;
                 }
                 case Job::None:

@@ -32,6 +32,17 @@ namespace Workers
 
     const BnetRecoveryStats &bnetRecoveryStats();
 
+    // Mineral assignment counters for this game (stacked minerals / mineral_assignment_fix)
+    struct BnetMiningStats
+    {
+        int assignOk = 0;          // Mineral patch assignments made
+        int assignFail = 0;        // assignMineralPatch calls that found no patch for a worker at its base
+        int idleHolds = 0;         // Idle miners near their base left waiting instead of being re-sent to the depot
+        int idleDepotMoves = 0;    // Idle miners near their base re-sent to the depot (upstream behavior)
+        int unassignedLong = 0;    // Miners that stayed without a patch near their base for stuck_worker_frames
+    };
+    const BnetMiningStats &bnetMiningStats();
+
     // Whether the given worker unit can currently be reassigned to non-gathering duties
     bool isAvailableForReassignment(const MyWorker &unit, bool allowCarryMinerals, bool allowMining);
 

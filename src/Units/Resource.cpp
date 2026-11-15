@@ -3,6 +3,7 @@
 #include "Geo.h"
 #include "Workers.h"
 #include "OrderProcessTimer.h"
+#include "Units.h"
 
 #define EPSILON 0.000001
 
@@ -50,6 +51,8 @@ BWAPI::Unit ResourceImpl::getBwapiUnitIfVisible() const
     {
         if (unit->getTilePosition() != tile) continue;
         if (isMinerals && !unit->getType().isMineralField()) continue;
+        // Stacked minerals: another field on the same tile is a different resource, never substitute it
+        if (isMinerals && Units::stackedMineralIdentityFix() && unit->getID() != id) continue;
         if (!isMinerals && unit->getType() != BWAPI::UnitTypes::Resource_Vespene_Geyser) continue;
         if (!unit->isVisible()) continue;
 

@@ -88,6 +88,10 @@
   "resource_fail_backoff_frames": 24,
   "supply_drop_event": 20,
 
+  "stacked_mineral_identity_fix": true,
+  "mineral_assignment_fix": true,
+  "mining_assignment_log": true,
+
   "print_build_info": true,
   "bnet_log": true
 }
