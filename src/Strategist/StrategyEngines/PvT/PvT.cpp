@@ -313,7 +313,108 @@ void PvT::updatePlays(std::vector<std::shared_ptr<Play>> &plays)
         if (hold) defendOurMain = true;
     }
 
-    updateAttackPlays(plays, defendOurMain);
+    // expansion_defense_redirect: upstream abandons a 3rd+ base when more than 5 dragoons' worth of enemies attack it.
+    // When the main army is strong enough it defends that base instead (Backrooms 1.1: 3rd and 4th lost to ~30 units
+    // while a 23-28 unit army sat in front of the enemy minefield).
+    Base *redirectTarget = nullptr;
+    {
+        auto &bnetConfig = BnetConfig::get();
+        auto mainArmyPlay = getPlay<MainArmyPlay>(plays);
+        auto enemyValueAt = [](Base *base)
+        {
+            int value = 0;
+            for (const auto &unit : Units::enemyAtBase(base)) value += CombatSim::unitValue(unit);
+            return value;
+        };
+        auto endRedirect = [&](const char *reason)
+        {
+            if (!plutoDefenseRedirectBase) return;
+            std::ostringstream ev;
+            ev << "defense_redirect end base=" << plutoDefenseRedirectBase->getTilePosition().x << ","
+               << plutoDefenseRedirectBase->getTilePosition().y << " reason=" << reason
+               << " frames=" << (currentFrame - plutoDefenseRedirectStart);
+            BnetLog::event(ev.str());
+            plutoDefenseRedirectBase = nullptr;
+        };
+
+        if (bnetConfig.plutoPvtSnipe && bnetConfig.expansionDefenseRedirect && !defendOurMain && mainArmyPlay
+            && !mainArmyPlay->isDefensive())
+        {
+            if (plutoDefenseRedirectBase)
+            {
+                if (plutoDefenseRedirectBase->owner != BWAPI::Broodwar->self())
+                {
+                    endRedirect("base_lost");
+                }
+                else
+                {
+                    if (enemyValueAt(plutoDefenseRedirectBase) > 0) plutoDefenseRedirectLastEnemy = currentFrame;
+                    if (!BnetPolicy::defenseRedirectKeep(currentFrame - plutoDefenseRedirectLastEnemy,
+                                                         currentFrame - plutoDefenseRedirectStart,
+                                                         480,
+                                                         2880))
+                    {
+                        endRedirect(currentFrame - plutoDefenseRedirectStart >= 2880 ? "timeout" : "clear");
+                    }
+                }
+            }
+
+            if (!plutoDefenseRedirectBase)
+            {
+                Base *best = nullptr;
+                int bestValue = 0;
+                for (auto base : Map::getMyBases())
+                {
+                    if (!base || base == Map::getMyMain() || base == Map::getMyNatural()) continue;
+                    if (base->island || base->mineralPatchCount() < 3) continue;
+                    int value = enemyValueAt(base);
+                    if (value > bestValue)
+                    {
+                        best = base;
+                        bestValue = value;
+                    }
+                }
+
+                if (best)
+                {
+                    int armyValue = 0;
+                    for (const auto &unit : mainArmyPlay->getSquad()->getUnits()) armyValue += CombatSim::unitValue(unit);
+                    int minEnemyValue = bnetConfig.defenseRedirectMinDragoons
+                                        * CombatSim::unitValue(BWAPI::UnitTypes::Protoss_Dragoon);
+                    bool start = BnetPolicy::defenseRedirectStart(true,
+                                                                  bestValue,
+                                                                  armyValue,
+                                                                  minEnemyValue,
+                                                                  bnetConfig.defenseRedirectRatio);
+                    std::ostringstream ev;
+                    ev << "base=" << best->getTilePosition().x << "," << best->getTilePosition().y
+                       << " enemy_value=" << bestValue << " army_value=" << armyValue
+                       << " min_enemy_value=" << minEnemyValue << " ratio=" << bnetConfig.defenseRedirectRatio;
+                    if (start)
+                    {
+                        plutoDefenseRedirectBase = best;
+                        plutoDefenseRedirectStart = currentFrame;
+                        plutoDefenseRedirectLastEnemy = currentFrame;
+                        BnetLog::defenseRedirect();
+                        BnetLog::event("defense_redirect start " + ev.str());
+                    }
+                    else if (bestValue >= minEnemyValue && currentFrame - plutoDefenseRedirectSkipLogged >= 480)
+                    {
+                        plutoDefenseRedirectSkipLogged = currentFrame;
+                        BnetLog::defense("redirect_skip " + ev.str());
+                    }
+                }
+            }
+
+            redirectTarget = plutoDefenseRedirectBase;
+        }
+        else
+        {
+            endRedirect("inactive");
+        }
+    }
+
+    updateAttackPlays(plays, defendOurMain, redirectTarget);
 
     updatePlutoSignals(plays);
 
@@ -352,7 +453,33 @@ void PvT::updatePlays(std::vector<std::shared_ptr<Play>> &plays)
         }
     }
 
-    updateDefendBasePlays(plays, homeGuardValue);
+    // expansion_guard_dragoons: keep dragoons at every 3rd+ base vs mech (the 3rd / 4th had 0-2 defenders on Backrooms 1.1)
+    int expansionGuardValue = 0;
+    {
+        auto &bnetConfig = BnetConfig::get();
+        bool mechThreat = enemyStrategy == TerranStrategy::TwoFactory ||
+                          enemyStrategy == TerranStrategy::MidGameMech ||
+                          enemyStrategy == TerranStrategy::MidGameBioMech ||
+                          Units::countEnemy(BWAPI::UnitTypes::Terran_Vulture) > 2 ||
+                          Units::hasEnemyBuilt(BWAPI::UnitTypes::Terran_Vulture_Spider_Mine);
+        bool guard = BnetPolicy::expansionGuardActive(bnetConfig.plutoPvtSnipe,
+                                                      bnetConfig.expansionGuardDragoons,
+                                                      mechThreat,
+                                                      earlyBioOrRush(enemyStrategy, ourStrategy));
+        if (guard)
+        {
+            expansionGuardValue = BnetPolicy::homeGuardValue(bnetConfig.expansionGuardDragoons,
+                                                             CombatSim::unitValue(BWAPI::UnitTypes::Protoss_Zealot));
+        }
+        if (guard != plutoExpansionGuard)
+        {
+            plutoExpansionGuard = guard;
+            BnetLog::event(std::string("expansion_guard ") + (guard ? "start" : "end")
+                           + " dragoons=" + std::to_string(bnetConfig.expansionGuardDragoons));
+        }
+    }
+
+    updateDefendBasePlays(plays, homeGuardValue, expansionGuardValue);
     updateSpecialTeamsPlays(plays);
     defaultExpansions(plays);
     scoutExpos(plays, 15000);
@@ -1025,7 +1152,8 @@ void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &
     // - Natural: natural_cannons once our natural nexus is complete (skipped for ForgeExpandGoons, handled by the FFE play),
     //   raised to mech_natural_cannons under a mech / vulture threat.
     // - Main: main_cannons against TwoFactory / mech / 3+ vultures / spider mines, not while holding a marine rush.
-    // - Other bases: expansion_cannons under the same threat, once each nexus is complete.
+    // - Other bases: expansion_cannons under the same threat, once each nexus is placed (expansion_cannon_at_nexus_start;
+    //   upstream / off: once it is complete).
     // Requests are at PRIORITY_NORMAL, below dragoon base production, except the first cannon (and its pylon) of a base
     // under a threat with cannon_threat_priority, which goes to PRIORITY_BASEDEFENSE (the forge follows as a prerequisite).
     // Only the predefined workerDefenseCannons locations are used, so the target count is not guaranteed (no choke cannon
@@ -1068,7 +1196,13 @@ void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &
     auto requestCannonsAtBase = [&](Base *base, int target, const char *kind, bool threat)
     {
         if (!base || target <= 0) return;
-        if (!base->resourceDepot || !base->resourceDepot->completed) return;
+        if (!BnetPolicy::cannonBaseReady(base->resourceDepot != nullptr,
+                                         base->resourceDepot && base->resourceDepot->completed,
+                                         std::string(kind) == "expansion",
+                                         bnetConfig.expansionCannonAtNexusStart))
+        {
+            return;
+        }
 
         auto &locations = BuildingPlacement::baseStaticDefenseLocations(base);
         if (!locations.isValid())
@@ -1109,14 +1243,17 @@ void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &
         }
 
         std::vector<BnetPolicy::CannonTile> tiles;
+        int backoffTiles = 0;
         for (const auto &location : locations.workerDefenseCannons)
         {
+            int tileKey = location.x * 1000 + location.y;
             auto building = Units::myBuildingAt(location);
             if (building)
             {
                 if (building->type != BWAPI::UnitTypes::Protoss_Photon_Cannon) tiles.push_back(BnetPolicy::CannonTile::Occupied);
                 else if (building->completed) tiles.push_back(BnetPolicy::CannonTile::Cannon);
                 else tiles.push_back(BnetPolicy::CannonTile::CannonPending);
+                if (building->type == BWAPI::UnitTypes::Protoss_Photon_Cannon) plutoCannonTilesSeen.insert(tileKey);
             }
             else if (Builder::isPendingHere(location))
             {
@@ -1124,12 +1261,30 @@ void PvT::handlePlutoNaturalCannons(std::map<int, std::vector<ProductionGoal>> &
             }
             else
             {
-                tiles.push_back(BnetPolicy::CannonTile::Empty);
+                // cannon_rebuild_backoff_frames: a cannon (or cannon under construction) at this tile was lost
+                if (plutoCannonTilesSeen.erase(tileKey) > 0 && bnetConfig.cannonRebuildBackoffFrames > 0)
+                {
+                    plutoCannonTileLost[tileKey] = currentFrame;
+                    BnetLog::cannonBackoff();
+                    BnetLog::event("cannon_backoff tile=" + std::to_string(location.x) + "," + std::to_string(location.y)
+                                   + " frames=" + std::to_string(bnetConfig.cannonRebuildBackoffFrames));
+                }
+                auto lostIt = plutoCannonTileLost.find(tileKey);
+                if (lostIt != plutoCannonTileLost.end()
+                    && BnetPolicy::cannonTileBackoff(lostIt->second, currentFrame, bnetConfig.cannonRebuildBackoffFrames))
+                {
+                    tiles.push_back(BnetPolicy::CannonTile::Occupied);
+                    backoffTiles++;
+                }
+                else
+                {
+                    tiles.push_back(BnetPolicy::CannonTile::Empty);
+                }
             }
         }
 
         auto plan = BnetPolicy::planCannons(tiles.data(), (int)tiles.size(), target);
-        if (plan.shortfall > 0) logOnce(base, "not enough free cannon locations for the requested count");
+        if (plan.shortfall > backoffTiles) logOnce(base, "not enough free cannon locations for the requested count");
 
         int framesUntilPowered = pylon->completed ? 0 : std::max(0, pylon->estimatedCompletionFrame - currentFrame);
         for (int i = 0; i < plan.requestCount; i++)

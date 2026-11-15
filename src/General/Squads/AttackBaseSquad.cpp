@@ -202,6 +202,57 @@ namespace
         return result;
     }
 
+    // Battle.net: whether a cluster is near our main or natural (rear_cluster_home_radius_px)
+    bool bnetClusterNearHome(const UnitCluster &cluster)
+    {
+        auto &bnetConfig = BnetConfig::get();
+        auto main = Map::getMyMain();
+        auto natural = Map::getMyNatural();
+        int distMain = main ? cluster.center.getApproxDistance(main->getPosition()) : -1;
+        int distNatural = (natural && natural->owner == BWAPI::Broodwar->self())
+                          ? cluster.center.getApproxDistance(natural->getPosition())
+                          : -1;
+        return BnetPolicy::clusterNearHome(distMain, distNatural, bnetConfig.rearClusterHomeRadiusPx);
+    }
+
+    // Battle.net: log each home mine once per game (home_mine_clear)
+    bool bnetFirstHomeMineLog(int id)
+    {
+        static std::set<int> logged;
+        static int lastFrame = -1;
+        if (currentFrame < lastFrame) logged.clear();
+        lastFrame = currentFrame;
+        return logged.insert(id).second;
+    }
+
+    // Battle.net: distance from a position to the closest of our bases (-1 if we have none)
+    int bnetDistToNearestBase(BWAPI::Position pos)
+    {
+        int best = -1;
+        for (auto base : Map::getMyBases())
+        {
+            if (!base) continue;
+            int dist = pos.getApproxDistance(base->getPosition());
+            if (best == -1 || dist < best) best = dist;
+        }
+        return best;
+    }
+
+    // Battle.net: enemy units that are a real threat to a rear cluster (not spider mines, not undetected units)
+    int bnetRealThreats(const std::set<Unit> &enemyUnits)
+    {
+        int count = 0;
+        for (const auto &unit : enemyUnits)
+        {
+            if (!unit->lastPositionValid) continue;
+            if (unit->type == BWAPI::UnitTypes::Terran_Vulture_Spider_Mine) continue;
+            if (unit->undetected) continue;
+            if (!unit->canAttackGround() && !unit->canAttackAir()) continue;
+            count++;
+        }
+        return count;
+    }
+
     bool shouldStartAttack(UnitCluster &cluster,
                            CombatSimResult &simResult,
                            double closestReinforcements,
@@ -419,7 +470,12 @@ namespace
 
         // Continue if our number of units has increased in the past 72 frames.
         // This gives our reinforcements time to link up with the rest of the cluster before engaging.
-        int count = 0;
+        // Battle.net: skipped for rear clusters near home, where production keeps adding units and the regroup never ends
+        // (rear_cluster_unstick_frames).
+        int count = BnetPolicy::skipReinforcementWait(BnetConfig::get().rearClusterUnstickFrames,
+                                                      cluster.isVanguardCluster,
+                                                      bnetClusterNearHome(cluster))
+                    ? 72 : 0;
         for (auto it = cluster.recentSimResults.rbegin(); it != cluster.recentSimResults.rend() && count < 72; it++)
         {
             if (simResult.myUnitCount > it->myUnitCount)
@@ -452,6 +508,40 @@ void AttackBaseSquad::execute(UnitCluster &cluster)
     if (cluster.vanguard) radius += cluster.vanguard->getDistance(cluster.center);
     Units::enemyInRadius(enemyUnits, cluster.center, radius);
 
+    auto &bnetConfig = BnetConfig::get();
+
+    // [ARMY] snapshot (army_state_log): position, state, nearby enemies / mines and detection of every cluster
+    if (bnetConfig.armyStateLog && currentFrame > 0 && currentFrame % bnetConfig.armyStateIntervalFrames == 0)
+    {
+        int mines = 0, undetected = 0;
+        for (const auto &unit : enemyUnits)
+        {
+            if (unit->type == BWAPI::UnitTypes::Terran_Vulture_Spider_Mine) mines++;
+            if (unit->undetected) undetected++;
+        }
+        int nearDetectors = 0;
+        for (const auto &detector : detectors)
+        {
+            if (detector->getDistance(cluster.center) < 480) nearDetectors++;
+        }
+        std::ostringstream os;
+        os << "squad=\"" << label << "\" tile=" << BWAPI::TilePosition(cluster.center).x << "," << BWAPI::TilePosition(cluster.center).y
+           << " units=" << cluster.units.size()
+           << " vanguard=" << cluster.isVanguardCluster
+           << " activity=" << cluster.getCurrentActivity()
+           << " sub=" << cluster.getCurrentSubActivity()
+           << " since=" << (currentFrame - cluster.lastActivityChange)
+           << " enemies=" << enemyUnits.size()
+           << " real_threats=" << bnetRealThreats(enemyUnits)
+           << " mines=" << mines
+           << " undetected=" << undetected
+           << " detectors=" << detectors.size()
+           << " detectors_near=" << nearDetectors
+           << " near_home=" << bnetClusterNearHome(cluster)
+           << " forced_move=" << (cluster.bnetForceMoveUntil > currentFrame);
+        BnetLog::army(os.str());
+    }
+
     // If there are no enemies near the cluster, just move towards the target
     if (enemyUnits.empty())
     {
@@ -461,6 +551,34 @@ void AttackBaseSquad::execute(UnitCluster &cluster)
     }
 
     updateDetectionNeeds(enemyUnits);
+
+    // home_mine_clear: upstream never asks for detection on spider mines, so a mine remembered next to our base kept
+    // rear clusters regrouping there for minutes. Known burrowed mines near our bases now need detection, so an observer
+    // goes there and the dragoons can kill the mine.
+    if (bnetConfig.homeMineClear)
+    {
+        for (const auto &unit : enemyUnits)
+        {
+            if (unit->type != BWAPI::UnitTypes::Terran_Vulture_Spider_Mine) continue;
+            if (!BnetPolicy::homeMineNeedsDetection(true,
+                                                    true,
+                                                    unit->burrowed,
+                                                    unit->lastPositionValid,
+                                                    bnetDistToNearestBase(unit->lastPosition),
+                                                    bnetConfig.homeMineClearRadiusPx))
+            {
+                continue;
+            }
+            if (enemiesNeedingDetection.insert(unit).second && bnetFirstHomeMineLog(unit->id))
+            {
+                BnetLog::mineClearRequest();
+                std::ostringstream os;
+                os << "home_mine_clear tile=" << BWAPI::TilePosition(unit->lastPosition).x << ","
+                   << BWAPI::TilePosition(unit->lastPosition).y << " detectors=" << detectors.size();
+                BnetLog::event(os.str());
+            }
+        }
+    }
 
     // Select targets
     auto unitsAndTargets = cluster.selectTargets(enemyUnits, targetPosition);
@@ -513,6 +631,41 @@ void AttackBaseSquad::execute(UnitCluster &cluster)
 
     simResult.closestReinforcements = closestReinforcements;
     simResult.reinforcementPercentage = reinforcementPercentage;
+
+    // rear_cluster_unstick_frames: a non-vanguard cluster near home that has been regrouping too long with no threat
+    // except mines / undetected units links up with the vanguard (Backrooms 1.1: 22 units stuck at the natural for two
+    // minutes next to a remembered spider mine)
+    {
+        bool haveOtherVanguard = currentVanguardCluster && currentVanguardCluster->vanguard
+                                 && currentVanguardCluster->center != cluster.center;
+        bool forcing = cluster.bnetForceMoveUntil > currentFrame;
+        if (BnetPolicy::rearClusterUnstick(bnetConfig.rearClusterUnstickFrames,
+                                           cluster.isVanguardCluster,
+                                           haveOtherVanguard,
+                                           bnetConfig.rearClusterUnstickFrames > 0 && bnetClusterNearHome(cluster),
+                                           bnetRealThreats(enemyUnits),
+                                           cluster.currentActivity == UnitCluster::Activity::Regrouping,
+                                           currentFrame - cluster.lastActivityChange,
+                                           forcing))
+        {
+            if (!forcing)
+            {
+                cluster.bnetForceMoveUntil = currentFrame + BnetPolicy::rearClusterForceFrames(bnetConfig.rearClusterUnstickFrames);
+                BnetLog::rearUnstick();
+                std::ostringstream os;
+                os << "rear_unstick tile=" << BWAPI::TilePosition(cluster.center).x << "," << BWAPI::TilePosition(cluster.center).y
+                   << " units=" << cluster.units.size()
+                   << " regroup_frames=" << (currentFrame - cluster.lastActivityChange)
+                   << " enemies=" << enemyUnits.size()
+                   << " vanguard_tile=" << BWAPI::TilePosition(currentVanguardCluster->vanguard->lastPosition).x << ","
+                   << BWAPI::TilePosition(currentVanguardCluster->vanguard->lastPosition).y;
+                BnetLog::event(os.str());
+            }
+            cluster.setActivity(UnitCluster::Activity::Moving);
+            cluster.move(currentVanguardCluster->vanguard->lastPosition);
+            return;
+        }
+    }
 
     // Make the final decision based on what state we are currently in
 

@@ -27,7 +27,7 @@ namespace BnetConfig
         int mainCannons = 1;                    // Conditional cannon requests in the main mineral line vs. vultures / mech (0-1);
                                                 // absent key -> 1 if natural_cannons > 0 else 0
         int mechNaturalCannons = 2;             // Natural target raised to this under a mech / vulture threat (0-2)
-        int expansionCannons = 1;               // Cannons in the mineral line of every other owned base under a mech / vulture threat (0-2)
+        int expansionCannons = 2;               // Cannons in the mineral line of every other owned base under a mech / vulture threat (0-2)
         bool cannonThreatPriority = true;       // First cannon (and its pylon) of each base above army production under a threat
         // Aggression multipliers vs. a recognized MidGameBio Terran (AttackBaseSquad), per decision state.
         // Effective values after the compatibility policy in BnetPolicy::resolveBioScales.
@@ -120,6 +120,23 @@ namespace BnetConfig
         bool mineralAssignmentFix = true;       // Patch assignment accepts distance 0 (patch touching the depot), ties broken
                                                 // by ID; a miner without a patch near its base is not re-sent to the depot
         bool miningAssignmentLog = true;        // [MINING] lines: resource registry, base patches, worker snapshots, failures
+
+        // Army / expansion defense (2026-11-15 Backrooms 1.1: rear army stuck at a home spider mine, 3rd / 4th lost)
+        bool armyStateLog = true;               // [ARMY] cluster snapshots and [DEFENSE] base defense decisions
+        int armyStateIntervalFrames = 720;      // [ARMY] snapshot interval (frames)
+        bool homeMineClear = true;              // Known burrowed spider mines near our bases need detection (observer + kill)
+        int homeMineClearRadiusPx = 960;        // ... within this distance of one of our bases
+        int rearClusterUnstickFrames = 480;     // Non-vanguard cluster near home regrouping this long with no threat except
+                                                // mines -> forced link-up with the vanguard. 0 = off
+        int rearClusterHomeRadiusPx = 1280;     // "Near home" = within this distance of our main or natural
+        bool expansionSelectFix = true;         // vs Terran: weight distance from our bases more, skip far bases
+        int expansionMaxDistancePx = 2500;      // ... bases farther than this (ground) from all our bases go last. 0 = no limit
+        int expansionGuardDragoons = 2;         // vs mech: dragoons kept at every 3rd+ base. 0 = off
+        bool expansionDefenseRedirect = true;   // Main army defends a 3rd+ base under a real attack when it is strong enough
+        double defenseRedirectRatio = 1.2;      // ... main army value >= ratio x enemy value at the base
+        int defenseRedirectMinDragoons = 3;     // ... enemy value at the base >= this many dragoons
+        bool expansionCannonAtNexusStart = true; // Expansion cannons requested when the nexus starts, not when it completes
+        int cannonRebuildBackoffFrames = 480;   // Cannon tile not re-requested for N frames after a cannon there was lost. 0 = off
 
         // Phase 3: Lightweight log
         bool printBuildInfo = true;             // Local-only in-game message at game start: build id and config source

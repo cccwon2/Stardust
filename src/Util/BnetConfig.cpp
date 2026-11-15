@@ -220,6 +220,20 @@ namespace BnetConfig
                 read(json, "stacked_mineral_identity_fix", config.stackedMineralIdentityFix);
                 read(json, "mineral_assignment_fix", config.mineralAssignmentFix);
                 read(json, "mining_assignment_log", config.miningAssignmentLog);
+                read(json, "army_state_log", config.armyStateLog);
+                read(json, "army_state_interval_frames", config.armyStateIntervalFrames);
+                read(json, "home_mine_clear", config.homeMineClear);
+                read(json, "home_mine_clear_radius_px", config.homeMineClearRadiusPx);
+                read(json, "rear_cluster_unstick_frames", config.rearClusterUnstickFrames);
+                read(json, "rear_cluster_home_radius_px", config.rearClusterHomeRadiusPx);
+                read(json, "expansion_select_fix", config.expansionSelectFix);
+                read(json, "expansion_max_distance_px", config.expansionMaxDistancePx);
+                read(json, "expansion_guard_dragoons", config.expansionGuardDragoons);
+                read(json, "expansion_defense_redirect", config.expansionDefenseRedirect);
+                read(json, "defense_redirect_ratio", config.defenseRedirectRatio);
+                read(json, "defense_redirect_min_dragoons", config.defenseRedirectMinDragoons);
+                read(json, "expansion_cannon_at_nexus_start", config.expansionCannonAtNexusStart);
+                read(json, "cannon_rebuild_backoff_frames", config.cannonRebuildBackoffFrames);
                 read(json, "print_build_info", config.printBuildInfo);
                 read(json, "bnet_log", config.bnetLog);
 
@@ -293,6 +307,15 @@ namespace BnetConfig
         config.arrivedMoveTolerancePx = std::clamp(config.arrivedMoveTolerancePx, 0, 128);
         config.resourceFailBackoffFrames = std::clamp(config.resourceFailBackoffFrames, 0, 240);
         config.supplyDropEvent = std::clamp(config.supplyDropEvent, 0, 200);
+        config.armyStateIntervalFrames = std::clamp(config.armyStateIntervalFrames, 120, 14400);
+        config.homeMineClearRadiusPx = std::clamp(config.homeMineClearRadiusPx, 0, 4000);
+        config.rearClusterUnstickFrames = std::clamp(config.rearClusterUnstickFrames, 0, 4800);
+        config.rearClusterHomeRadiusPx = std::clamp(config.rearClusterHomeRadiusPx, 0, 6000);
+        config.expansionMaxDistancePx = std::clamp(config.expansionMaxDistancePx, 0, 10000);
+        config.expansionGuardDragoons = std::clamp(config.expansionGuardDragoons, 0, 4);
+        config.defenseRedirectRatio = std::clamp(config.defenseRedirectRatio, 0.5, 5.0);
+        config.defenseRedirectMinDragoons = std::clamp(config.defenseRedirectMinDragoons, 1, 20);
+        config.cannonRebuildBackoffFrames = std::clamp(config.cannonRebuildBackoffFrames, 0, 4800);
     }
 
     const Config &get()
@@ -402,6 +425,20 @@ namespace BnetConfig
            << " stacked_mineral_identity_fix=" << config.stackedMineralIdentityFix
            << " mineral_assignment_fix=" << config.mineralAssignmentFix
            << " mining_assignment_log=" << config.miningAssignmentLog
+           << " army_state_log=" << config.armyStateLog
+           << " army_state_interval_frames=" << config.armyStateIntervalFrames
+           << " home_mine_clear=" << config.homeMineClear
+           << " home_mine_clear_radius_px=" << config.homeMineClearRadiusPx
+           << " rear_cluster_unstick_frames=" << config.rearClusterUnstickFrames
+           << " rear_cluster_home_radius_px=" << config.rearClusterHomeRadiusPx
+           << " expansion_select_fix=" << config.expansionSelectFix
+           << " expansion_max_distance_px=" << config.expansionMaxDistancePx
+           << " expansion_guard_dragoons=" << config.expansionGuardDragoons
+           << " expansion_defense_redirect=" << config.expansionDefenseRedirect
+           << " defense_redirect_ratio=" << config.defenseRedirectRatio
+           << " defense_redirect_min_dragoons=" << config.defenseRedirectMinDragoons
+           << " expansion_cannon_at_nexus_start=" << config.expansionCannonAtNexusStart
+           << " cannon_rebuild_backoff_frames=" << config.cannonRebuildBackoffFrames
            << " print_build_info=" << config.printBuildInfo
            << " bnet_log=" << config.bnetLog;
         return os.str();

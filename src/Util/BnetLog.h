@@ -38,6 +38,11 @@ namespace BnetLog
     // Written only with mining_assignment_log.
     void mining(const std::string &text);
 
+    // Army / base defense diagnostics ([ARMY] cluster snapshots, [DEFENSE] base defense decisions).
+    // Written only with army_state_log.
+    void army(const std::string &text);
+    void defense(const std::string &text);
+
     // Call from onEnd
     void gameEnd(bool isWinner);
 
@@ -106,6 +111,21 @@ namespace BnetLog
 
     // Non-worker moves skipped by the arrived-unit move guard (arrived_move_hold_frames)
     void arrivedMoveHeld();
+
+    // Rear clusters near home forced to link up with the vanguard after regrouping too long (rear_cluster_unstick_frames)
+    void rearUnstick();
+
+    // Known burrowed spider mines near our bases added to the main army detection needs (home_mine_clear)
+    void mineClearRequest();
+
+    // Main army redirected to defend one of our expansions (expansion_defense_redirect)
+    void defenseRedirect();
+
+    // Expansion guard plays added (expansion_guard_dragoons)
+    void expansionGuard();
+
+    // Cannon tiles skipped after a cannon there was lost (cannon_rebuild_backoff_frames)
+    void cannonBackoff();
 
     // PvT mech expansion gate state change (logged as an [EVENT] line only when the state changes)
     void mechExpandGate(bool blocked, int bases, int armyUnits, int required);

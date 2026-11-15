@@ -1,4 +1,5 @@
 #include "StrategyEngine.h"
+#include "BnetLog.h"
 
 #include "Map.h"
 #include "Builder.h"
@@ -435,8 +436,28 @@ void StrategyEngine::mainArmyProduction(std::map<int, std::vector<ProductionGoal
     }
 }
 
-void StrategyEngine::updateDefendBasePlays(std::vector<std::shared_ptr<Play>> &plays, int mainHomeGuardValue)
+void StrategyEngine::updateDefendBasePlays(std::vector<std::shared_ptr<Play>> &plays, int mainHomeGuardValue,
+                                           int expansionGuardValue)
 {
+    // [DEFENSE] one line per 3rd+ base whenever its defense decision changes (army_state_log)
+    static std::map<Base *, std::string> bnetLastDecision;
+    static int bnetLastFrame = -1;
+    if (currentFrame < bnetLastFrame) bnetLastDecision.clear();
+    bnetLastFrame = currentFrame;
+    auto bnetLogDecision = [](Base *base, const std::string &decision, int enemyValue)
+    {
+        auto &last = bnetLastDecision[base];
+        if (last == decision) return;
+        last = decision;
+        std::ostringstream os;
+        os << "base=" << base->getTilePosition().x << "," << base->getTilePosition().y
+           << " decision=" << decision
+           << " enemy_value=" << enemyValue
+           << " dragoon_value=" << CombatSim::unitValue(BWAPI::UnitTypes::Protoss_Dragoon)
+           << " pressure=" << Strategist::pressure();
+        BnetLog::defense(os.str());
+    };
+
     auto mainArmyPlay = getPlay<MainArmyPlay>(plays);
 
     // First gather the list of bases we want to defend
@@ -478,9 +499,22 @@ void StrategyEngine::updateDefendBasePlays(std::vector<std::shared_ptr<Play>> &p
             }
 
             // If too many enemies are threatening the base, don't bother trying to defend it, unless it is our main or natural in the early game
+            bool bnetExpansion = base != Map::getMyMain() && base != Map::getMyNatural();
             if (!isMainOrNaturalInEarlyGame && enemyValue > 5 * CombatSim::unitValue(BWAPI::UnitTypes::Protoss_Dragoon))
             {
+                if (bnetExpansion) bnetLogDecision(base, "abandon_too_strong", enemyValue);
                 continue;
+            }
+
+            // Expansion guard (expansion_guard_dragoons): keep a few dragoons at every 3rd+ base vs mech
+            if (bnetExpansion && expansionGuardValue > enemyValue)
+            {
+                if (enemyValue == 0) bnetLogDecision(base, "guard", enemyValue);
+                enemyValue = expansionGuardValue;
+            }
+            else if (bnetExpansion)
+            {
+                bnetLogDecision(base, enemyValue > 0 ? "defend" : "idle", enemyValue);
             }
 
             // Home guard: keep a few units at our main even without enemies there (vulture drops in Pluto's 1-1-1)
@@ -519,6 +553,11 @@ void StrategyEngine::updateDefendBasePlays(std::vector<std::shared_ptr<Play>> &p
         plays.emplace(plays.begin(), std::make_shared<DefendBase>(
                 baseToDefend.first,
                 baseToDefend.second));
+        if (expansionGuardValue > 0 && baseToDefend.second == expansionGuardValue
+            && baseToDefend.first != Map::getMyMain() && baseToDefend.first != Map::getMyNatural())
+        {
+            BnetLog::expansionGuard();
+        }
         CherryVis::log() << "Added defend base play for base @ " << BWAPI::WalkPosition(baseToDefend.first->getPosition());
     }
 }

@@ -96,7 +96,18 @@ namespace BnetLog
         int invalidMoves = 0;
         int workerFlees = 0;
         int arrivedHolds = 0;
+        int rearUnsticks = 0;
+        int mineClearRequests = 0;
+        int defenseRedirects = 0;
+        int expansionGuards = 0;
+        int cannonBackoffs = 0;
     }
+
+    void rearUnstick() { rearUnsticks++; }
+    void mineClearRequest() { mineClearRequests++; }
+    void defenseRedirect() { defenseRedirects++; }
+    void expansionGuard() { expansionGuards++; }
+    void cannonBackoff() { cannonBackoffs++; }
 
     void arrivedMoveHeld()
     {
@@ -200,6 +211,11 @@ namespace BnetLog
             invalidMoves = 0;
             workerFlees = 0;
             arrivedHolds = 0;
+            rearUnsticks = 0;
+            mineClearRequests = 0;
+            defenseRedirects = 0;
+            expansionGuards = 0;
+            cannonBackoffs = 0;
         }
 
         // Cumulative counters, appended to [APM] and [END]
@@ -246,6 +262,11 @@ namespace BnetLog
                << " invalid_moves=" << invalidMoves
                << " worker_flees=" << workerFlees
                << " arrived_holds=" << arrivedHolds
+               << " rear_unsticks=" << rearUnsticks
+               << " mine_clear_requests=" << mineClearRequests
+               << " defense_redirects=" << defenseRedirects
+               << " expansion_guards=" << expansionGuards
+               << " cannon_backoffs=" << cannonBackoffs
                << " latency_max=" << BnetConfig::maxLatencyFrames()
                << " cmd_interval=" << BnetConfig::commandIntervalFrames();
             return os.str();
@@ -522,6 +543,18 @@ namespace BnetLog
         writeLine("MINING", text);
     }
 
+    void army(const std::string &text)
+    {
+        if (!BnetConfig::get().armyStateLog) return;
+        writeLine("ARMY", text);
+    }
+
+    void defense(const std::string &text)
+    {
+        if (!BnetConfig::get().armyStateLog) return;
+        writeLine("DEFENSE", text);
+    }
+
     void mechExpandGate(bool blocked, int bases, int armyUnits, int required)
     {
         int state = blocked ? 1 : 0;
@@ -568,6 +601,8 @@ namespace BnetLog
     void myStrategyChanged(const std::string &) {}
     void event(const std::string &) {}
     void mining(const std::string &) {}
+    void army(const std::string &) {}
+    void defense(const std::string &) {}
     void mechExpandGate(bool blocked, int, int, int)
     {
         int state = blocked ? 1 : 0;

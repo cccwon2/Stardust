@@ -40,6 +40,9 @@ public:
 
     bool isVanguardCluster;
 
+    // Battle.net: rear cluster forced to link up with the vanguard until this frame (rear_cluster_unstick_frames)
+    int bnetForceMoveUntil = 0;
+
     explicit UnitCluster(const MyUnit &unit);
 
     virtual ~UnitCluster() = default;
