@@ -5,7 +5,7 @@ AI for StarCraft: Brood War
 
 이 포크는 StarCraft: Remastered Battle.net의 지연 환경에서 채취 안정성과 명령량(APM)을 개선하고, Pluto 스타일 테란과 사람 상대의 초반 러시에 대응하기 위한 프로토스 봇입니다. 작업 브랜치는 `bnet-pluto`이며 검토된 변경은 `main`에 병합합니다. 원작은 [bmnielsen/Stardust](https://github.com/bmnielsen/Stardust)입니다.
 
-문서 기준: 2026-11-15 KST, 코드 커밋 [`01977b2e`](../../commit/01977b2e) (저그전, 도달할 수 없는 벽 파일런이면 본진 오프닝). 구현 상세·전체 설정·제한 사항은 [Battle.net 가이드](docs/BNET.md), 기본값은 [JSON 템플릿](config/stardust_bnet.json)을 참고하세요.
+문서 기준: 2026-11-15 KST, 코드 커밋 [`01977b2e`](../../commit/01977b2ec68db77f917ba5cc1f4711d0e8517e55) (저그전, 도달할 수 없는 벽 파일런이면 본진 오프닝). 구현 상세·전체 설정·제한 사항은 [Battle.net 가이드](docs/BNET.md), 기본값은 [JSON 템플릿](config/stardust_bnet.json)을 참고하세요.
 
 ### 구현 단계와 최신 변경
 
