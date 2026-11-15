@@ -104,7 +104,18 @@ namespace
                      || Units::isBeingUpgradedOrResearched(BWAPI::UpgradeTypes::Singularity_Charge);
         bool haveStargate = Units::countAll(BWAPI::UnitTypes::Protoss_Stargate) > 0;
         bool haveCitadel = Units::countAll(BWAPI::UnitTypes::Protoss_Citadel_of_Adun) > 0;
+        bool citadelDone = Units::countCompleted(BWAPI::UnitTypes::Protoss_Citadel_of_Adun) > 0;
         bool haveArchives = Units::countAll(BWAPI::UnitTypes::Protoss_Templar_Archives) > 0;
+        bool archivesDone = Units::countCompleted(BWAPI::UnitTypes::Protoss_Templar_Archives) > 0;
+        bool leg = BWAPI::Broodwar->self()->getUpgradeLevel(BWAPI::UpgradeTypes::Leg_Enhancements) > 0
+                   || Units::isBeingUpgradedOrResearched(BWAPI::UpgradeTypes::Leg_Enhancements);
+        bool storm = BWAPI::Broodwar->self()->hasResearched(BWAPI::TechTypes::Psionic_Storm)
+                     || Units::isBeingUpgradedOrResearched(BWAPI::TechTypes::Psionic_Storm);
+        bool haveTemplar = Units::countAll(BWAPI::UnitTypes::Protoss_High_Templar) > 0;
+        bool hydra = Units::hasEnemyBuilt(BWAPI::UnitTypes::Zerg_Hydralisk_Den)
+                     || Units::countEnemy(BWAPI::UnitTypes::Zerg_Hydralisk) > 0;
+        bool muta = Units::hasEnemyBuilt(BWAPI::UnitTypes::Zerg_Spire)
+                    || Units::countEnemy(BWAPI::UnitTypes::Zerg_Mutalisk) > 0;
 
         auto tech = BnetPolicy::pvzNextGasTech(true,
                                                BWAPI::Broodwar->self()->gas(),
@@ -112,7 +123,13 @@ namespace
                                                range,
                                                haveStargate,
                                                haveCitadel,
-                                               haveArchives);
+                                               haveArchives,
+                                               BnetPolicy::pvzHydraNotMuta(hydra, muta),
+                                               citadelDone,
+                                               leg,
+                                               archivesDone,
+                                               storm,
+                                               haveTemplar);
         if (tech == BnetPolicy::PvzGasTech::None) return;
 
         // Below cannons and the probes we still need. Further probes move under this so the building is paid for.
@@ -147,6 +164,11 @@ namespace
                                                                   1,
                                                                   1);
                 break;
+            case BnetPolicy::PvzGasTech::LegSpeed:
+                prioritizedProductionGoals[priority].emplace_back(std::in_place_type<UpgradeProductionGoal>,
+                                                                  "pvz-gas",
+                                                                  BWAPI::UpgradeTypes::Leg_Enhancements);
+                break;
             case BnetPolicy::PvzGasTech::Archives:
                 prioritizedProductionGoals[priority].emplace_back(std::in_place_type<UnitProductionGoal>,
                                                                   "pvz-gas",
@@ -154,9 +176,30 @@ namespace
                                                                   1,
                                                                   1);
                 break;
+            case BnetPolicy::PvzGasTech::Storm:
+                prioritizedProductionGoals[priority].emplace_back(std::in_place_type<UpgradeProductionGoal>,
+                                                                  "pvz-gas",
+                                                                  BWAPI::TechTypes::Psionic_Storm);
+                break;
+            case BnetPolicy::PvzGasTech::HighTemplar:
+                prioritizedProductionGoals[priority].emplace_back(std::in_place_type<UnitProductionGoal>,
+                                                                  "pvz-gas",
+                                                                  BWAPI::UnitTypes::Protoss_High_Templar,
+                                                                  1,
+                                                                  1);
+                break;
             case BnetPolicy::PvzGasTech::None:
                 break;
         }
+    }
+
+    bool enemyHydraNotMuta()
+    {
+        bool hydra = Units::hasEnemyBuilt(BWAPI::UnitTypes::Zerg_Hydralisk_Den)
+                     || Units::countEnemy(BWAPI::UnitTypes::Zerg_Hydralisk) > 0;
+        bool muta = Units::hasEnemyBuilt(BWAPI::UnitTypes::Zerg_Spire)
+                    || Units::countEnemy(BWAPI::UnitTypes::Zerg_Mutalisk) > 0;
+        return BnetPolicy::pvzHydraNotMuta(hydra, muta);
     }
 }
 
@@ -458,6 +501,18 @@ void PvZ::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
 
     if (handleIslandExpansionProduction(plays, prioritizedProductionGoals)) return;
 
+    // +1 ground weapons as soon as the forge is up, ahead of extra gateways and dragoons. Every map.
+    if (Units::countCompleted(BWAPI::UnitTypes::Protoss_Forge) > 0)
+    {
+        upgrade(prioritizedProductionGoals, BWAPI::UpgradeTypes::Protoss_Ground_Weapons, 1, PRIORITY_BASEDEFENSE);
+    }
+
+    // Confirmed hydras, and not mutalisks: a cannon at the entrance, not on the mineral line.
+    if (enemyHydraNotMuta())
+    {
+        buildDefensiveCannons(prioritizedProductionGoals, true, 0, 0);
+    }
+
     auto mainArmyPlay = getPlay<MainArmyPlay>(plays);
     auto completedUnits = mainArmyPlay ? mainArmyPlay->getSquad()->getUnitCountByType() : emptyUnitCountMap;
     auto &incompleteUnits = mainArmyPlay ? mainArmyPlay->assignedIncompleteUnits : emptyUnitCountMap;
@@ -739,6 +794,12 @@ void PvZ::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
                                                            bnetConfig.pvzAllinZealots,
                                                            Units::countEnemy(BWAPI::UnitTypes::Zerg_Zergling));
             desiredZealots = std::max(desiredZealots, bnetMinZealots);
+            if (enemyHydraNotMuta())
+            {
+                int hydras = Units::countEnemy(BWAPI::UnitTypes::Zerg_Hydralisk);
+                if (hydras < 4 && Units::hasEnemyBuilt(BWAPI::UnitTypes::Zerg_Hydralisk_Den)) hydras = 4;
+                desiredZealots = std::max(desiredZealots, std::min(8, hydras));
+            }
             bnetLogDefenseState(BnetPolicy::pvzWallCannonTarget(bnetConfig.pvzAntiAllinFix, bnetPoolFirst, bnetConfig.pvzPoolFirstCannons),
                                 bnetMinZealots,
                                 BnetPolicy::pvzProbeCap(bnetConfig.pvzAntiAllinFix, bnetAllIn, bnetConfig.pvzAllinProbeCap));
@@ -875,7 +936,7 @@ void PvZ::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
 
             // Now use this to determine our unit mix
             // We prefer zealots more and more as the enemy ling percentage goes up, but still build some goons
-            double desiredZealotRatio = enemyLingPercentage * 0.8;
+            double desiredZealotRatio = BnetPolicy::pvzHydraZealotRatio(enemyHydraNotMuta(), enemyLingPercentage * 0.8);
 
             double actualZealotRatio = 0.0;
             if ((zealotCount + dragoonCount) > 0)
@@ -920,9 +981,28 @@ void PvZ::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
 
     // FFE and the early midgame were floating gas (500 by 6:00, 858 by 8:00) while the cybernetics core,
     // dragoon range, stargate, citadel and templar archives were missing. Queue the next one of those.
+    // Against confirmed hydras the next item is the citadel, then leg speed, archives, storm, and templars.
     if (isFFE() || ourStrategy == OurStrategy::MidGame)
     {
         spendSurplusGas(prioritizedProductionGoals);
+    }
+
+    if (enemyHydraNotMuta()
+        && (BWAPI::Broodwar->self()->hasResearched(BWAPI::TechTypes::Psionic_Storm)
+            || Units::isBeingUpgradedOrResearched(BWAPI::TechTypes::Psionic_Storm)))
+    {
+        int have = Units::countAll(BWAPI::UnitTypes::Protoss_High_Templar);
+        int hydras = Units::countEnemy(BWAPI::UnitTypes::Zerg_Hydralisk);
+        int want = hydras / 4;
+        if (want < 2) want = 2;
+        if (have < want)
+        {
+            prioritizedProductionGoals[PRIORITY_MAINARMY].emplace_back(std::in_place_type<UnitProductionGoal>,
+                                                                       "pvz-hydra",
+                                                                       BWAPI::UnitTypes::Protoss_High_Templar,
+                                                                       want - have,
+                                                                       1);
+        }
     }
 }
 

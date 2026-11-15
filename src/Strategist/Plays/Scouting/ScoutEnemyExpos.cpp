@@ -130,23 +130,16 @@ void ScoutEnemyExpos::update()
     CherryVis::setBoardValue("ScoutEnemyExpos_target", (std::ostringstream() << targetBase->getTilePosition()).str());
 #endif
 
-    // TODO: Support scouting with a worker or other unit
-
-    // We prefer to scout with an observer, so if we don't currently have one, request one
-    // This play is lower-priority than combat plays, so it might get taken by another play if the enemy has cloaked units
-    if (!scout || scout->type != BWAPI::UnitTypes::Protoss_Observer)
+    // Later scouting is a zealot, not another probe, on every map. An observer is used when one is already built.
+    if (!scout)
     {
-        status.unitRequirements.emplace_back(1, BWAPI::UnitTypes::Protoss_Observer, targetBase->getPosition());
-    }
-
-    // Request a worker scout if we have no scout and we haven't had a worker scout die on us before
-    if (!scout && !workerScoutHasDied)
-    {
-        auto worker = Workers::getClosestReassignableWorker(targetBase->getPosition(), false);
-        if (worker)
+        if (Units::countCompleted(BWAPI::UnitTypes::Protoss_Observer) > 0)
         {
-            Workers::reserveWorker(worker);
-            scout = worker;
+            status.unitRequirements.emplace_back(1, BWAPI::UnitTypes::Protoss_Observer, targetBase->getPosition());
+        }
+        else
+        {
+            status.unitRequirements.emplace_back(1, BWAPI::UnitTypes::Protoss_Zealot, targetBase->getPosition());
         }
     }
 

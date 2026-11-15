@@ -77,7 +77,7 @@ namespace BnetConfig
         bool pvzAntiAllinFix = true;            // Master switch for the PvZ changes below
         int pvzAllinBaseLings = 6;              // Zerglings at our main / natural that confirm an all-in (before frame 9000). 0 = off
         int pvzAllinSeenLings = 12;             // Living zerglings seen that confirm an all-in (before frame 8000). 0 = off
-        int pvzPoolFirstCannons = 3;            // FFE wall cannons once a pool-first opening is recognized (2-5)
+        int pvzPoolFirstCannons = 2;            // FFE wall cannons once a pool-first opening is recognized (capped at 2)
         int pvzPoolFirstZealots = 2;            // FFEDragoons: zealots before dragoons vs. pool first (0-6)
         int pvzAllinZealots = 4;                // FFEDragoons: minimum zealots vs. an all-in, above probe production (0-12)
         int pvzAllinProbeCap = 18;              // FFE: probes above this move below zealots during an all-in. 0 = off

@@ -117,7 +117,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 | `forced_pvz_opening` | `FFEDragoons` | 저그전 오프닝 고정(`FFEDragoons` / `SairSpeedlot` / `EarlyGameDefense`); 빈 값은 UCB1 |
 | `pvz_antiallin_fix` | `true` | 저그전 저글링 올인 대응 스위치 |
 | `pvz_allin_base_lings` / `pvz_allin_seen_lings` | `6` / `12` | 본진·앞마당에 보인 저글링 / 살아 있는 저글링 수로 올인 조기 확정 |
-| `pvz_pool_first_cannons` | `3` | 선풀 판별 시 포지 더블 입구 캐논 목표 |
+| `pvz_pool_first_cannons` | `2` | 선풀 판별 시 포지 더블 입구 캐논 목표. 3은 과하고 상한은 2(맵 무관) |
 | `pvz_pool_first_zealots` / `pvz_allin_zealots` | `2` / `4` | 선풀 / 올인 시 최소 질럿 수(올인 시 프로브보다 먼저) |
 | `pvz_allin_probe_cap` | `18` | 올인 중 이 수를 넘는 프로브 생산을 질럿 뒤로 미룸; 0은 끔 |
 | `bio_attack_start_scale` | `0.7` | MidGameBio 상대 공격 시작 배율 |
@@ -145,6 +145,8 @@ powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 
 순정 PvT UCB1 후보는 이미 `EarlyGameDefense` 하나입니다. 오프닝 고정의 주요 차이는 상대 이름별 이력과 무관한 명시적 선택 및 랜덤 상대의 PvU 탐색 우회입니다. 캐논은 배치 가능 위치·전략 조건·생산 우선순위에 따른 요청이며 건설 보장이 아닙니다.
 
+저그전 아래 행동은 맵 이름과 무관하게 모든 맵에 적용됩니다. 선풀 입구 캐논은 2기가 상한이고, 풀이 보이면 앞마당 넥서스보다 게이트·질럿을 먼저 요청합니다. 히드라 덴 또는 히드라가 확인되고 스파이어·뮤탈리스크는 아니면, 넥서스 미네랄 캐논은 더 두지 않고 입구(벽 또는 초크)에 캐논을 더 둡니다. 같은 조건에서 가스 건물은 시타델 → 시타델이 끝나는 즉시 질럿 다리 속도 → 템플러 아카이브 → 스톰 → 하이템플러 순서이고, 스타게이트를 그 앞에 두지 않습니다. 질럿 비율은 히드라전에서 질럿+드라군 병력의 절반 이상입니다. 시작 정찰은 프로브 1기이고, 이후 추가 정찰은 질럿입니다. 포지가 끝나면 +1 지상 무기를 추가 게이트보다 먼저 요청합니다. 히드라(럴커 포함)를 앞에 둔 2–3 드라군은 들어가지 않고, 질럿+드라군(스톰이 있으면 하이템플러)이 그 수보다 작으면 싸우지 않습니다.
+
 호환성: 기존 `bio_aggression_scale`은 시작·재개에만 적용되고 새 키가 우선합니다. `main_cannons`가 없는 기존 설정은 `natural_cannons > 0`이면 1, 아니면 0으로 해석됩니다.
 
 ### 경기 로그와 검증 상태
@@ -163,7 +165,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 
 코드·문서·빌드 스크립트가 존재하는 것과 실행 검증은 구분합니다.
 
-- 확인됨: [독립 정책 테스트](tools/bnet-policy-test) 356개 검사(겹친 미네랄 배정 시뮬레이션 포함: 원작은 거리 0인 병합 자원에 프로브 4기 중 1기만 배정, 수정 후 2기; 거리 0인 미네랄 8개에 12기 중 8기 → 12기; DefendBase 탐지 미완 해제 조건 검사 포함)와 설정 로더 테스트 통과(Linux g++), 변경 소스의 g++(C++23) 문법 검사. 사용자 Windows 환경에서 `bnet-pluto@9fabc694` 빌드가 배틀넷 저그전에서 실행되어 2분 시점 `orders_per_min`이 약 100으로 기록됨. `bnet-pluto@32a56cdb` 빌드로 2경기 실행(Attitude SE 2.1 저그전 승리, Radeon 1.2 프로토스전 16:20 패배); 이 두 경기 리플레이·로그 분석이 PR #15의 근거입니다. `bnet-pluto@0264e7aa` 빌드의 OdysseyRE 2.0 경기 로그(0:39에 `res_issued=2`, `orders_worker=232`, `stuck_attempts=0`)와 코드 분석이 PR #16의 근거입니다. 같은 빌드의 Backrooms 1.1 테란전(13:48 패배) 로그·리플레이 분석이 PR #17의 근거입니다. `bnet-pluto@908059a0` KnockOut 1.4 테란전(10:27 패배, 벌처 런바이·`worker_flees`/`invalid_moves` 폭주) 로그·리플레이 분석이 홈 가드 유지·도주 좌표 고정의 근거입니다. Fighting Spirit 1.4 저그전(2:52 저글링 난입 때 캐논 미착공, 캐논 자리 프로브 4기 대기, 가스 858) 로그·리플레이 분석이 PR #18의 근거입니다.
+- 확인됨: [독립 정책 테스트](tools/bnet-policy-test) 407개 검사(겹친 미네랄 배정 시뮬레이션 포함: 원작은 거리 0인 병합 자원에 프로브 4기 중 1기만 배정, 수정 후 2기; 거리 0인 미네랄 8개에 12기 중 8기 → 12기; DefendBase 탐지 미완 해제 조건 검사 포함)와 설정 로더 테스트 통과(Linux g++), 변경 소스의 g++(C++23) 문법 검사. 사용자 Windows 환경에서 `bnet-pluto@9fabc694` 빌드가 배틀넷 저그전에서 실행되어 2분 시점 `orders_per_min`이 약 100으로 기록됨. `bnet-pluto@32a56cdb` 빌드로 2경기 실행(Attitude SE 2.1 저그전 승리, Radeon 1.2 프로토스전 16:20 패배); 이 두 경기 리플레이·로그 분석이 PR #15의 근거입니다. `bnet-pluto@0264e7aa` 빌드의 OdysseyRE 2.0 경기 로그(0:39에 `res_issued=2`, `orders_worker=232`, `stuck_attempts=0`)와 코드 분석이 PR #16의 근거입니다. 같은 빌드의 Backrooms 1.1 테란전(13:48 패배) 로그·리플레이 분석이 PR #17의 근거입니다. `bnet-pluto@908059a0` KnockOut 1.4 테란전(10:27 패배, 벌처 런바이·`worker_flees`/`invalid_moves` 폭주) 로그·리플레이 분석이 홈 가드 유지·도주 좌표 고정의 근거입니다. Fighting Spirit 1.4 저그전(2:52 저글링 난입 때 캐논 미착공, 캐논 자리 프로브 4기 대기, 가스 858) 로그·리플레이 분석이 PR #18의 근거입니다. Attitude SE 2.1 저그전(16:06 패배, 선풀 캐논 3기, 히드라 덴 확인 후 드라군 59회 생산·질럿 5회, 시타델·스톰·하이템플러 명령 없음) 로그·리플레이 분석이 히드라 대응의 근거입니다.
 - 미확인: PR #18(초반 벽 캐논·잉여 가스 테크)의 Windows 빌드와 실전 효과, 홈 가드 유지·도주 좌표 고정의 Windows 빌드와 KnockOut/유사 맵 실전 효과, PR #17(병력·확장 방어)의 Windows 빌드와 실전 효과, 후방 무리 정체가 기억된 마인 때문이라는 원인(시간·위치가 일치하는 정황 근거; 새 `[ARMY]` 로그로 확인 예정), 공격받는 확장의 일꾼 대피(미구현), PR #16(겹친 미네랄 채취 수정)의 Windows 빌드와 OdysseyRE 실전 효과(새 `[MINING]` 로그로 확인 예정), PR #15(프로토스전 리버·셔틀 대응, 도착 유닛 이동 억제, 자원 명령 백오프)의 Windows 빌드와 실전 효과, PR #14(벌처 드랍·마인 대응)와 PR #8(저그 올인 대응)의 실전 효과, Attitude 경기에서 BWAPI가 자원 명령 약 1,826건을 거부한 원인(새 `res_failed` 이벤트로 확인 예정), 중후반 대규모 교전의 명령량, 이동 명령 생략이 드라군 컨트롤에 주는 영향. 승률 향상은 보증하지 않습니다. 기본 전술 수치는 실전 조정의 출발점입니다. 하이템플러 스톰 마이크로와 리버·스캐럽 회피 마이크로는 추가되지 않았고, 프로토스전 적 전략 인식(`EarlyRobo`)은 바뀌지 않았습니다.
 
 ## About

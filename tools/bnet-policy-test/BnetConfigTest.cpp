@@ -58,11 +58,11 @@ int main(){
   std::filesystem::remove_all("bwapi-data");
   BnetConfig::initialize(); c=BnetConfig::get();
   C(c.forcedPvzOpening=="FFEDragoons" && c.pvzAntiAllinFix && c.pvzAllinBaseLings==6 && c.pvzAllinSeenLings==12);
-  C(c.pvzPoolFirstCannons==3 && c.pvzPoolFirstZealots==2 && c.pvzAllinZealots==4 && c.pvzAllinProbeCap==18);
+  C(c.pvzPoolFirstCannons==2 && c.pvzPoolFirstZealots==2 && c.pvzAllinZealots==4 && c.pvzAllinProbeCap==18);
   w("{\"forced_pvz_opening\": \"\", \"pvz_antiallin_fix\": false, \"pvz_allin_base_lings\": -1, \"pvz_allin_seen_lings\": 99, \"pvz_pool_first_cannons\": 9, \"pvz_pool_first_zealots\": -2, \"pvz_allin_zealots\": 50, \"pvz_allin_probe_cap\": 3}");
   BnetConfig::initialize(); c=BnetConfig::get();
   C(c.forcedPvzOpening.empty() && !c.pvzAntiAllinFix && c.pvzAllinBaseLings==0 && c.pvzAllinSeenLings==40);
-  C(c.pvzPoolFirstCannons==5 && c.pvzPoolFirstZealots==0 && c.pvzAllinZealots==12 && c.pvzAllinProbeCap==12);
+  C(c.pvzPoolFirstCannons==2 && c.pvzPoolFirstZealots==0 && c.pvzAllinZealots==12 && c.pvzAllinProbeCap==12);
   w("{\"pvz_allin_probe_cap\": 0, \"pvz_pool_first_cannons\": 1}");
   BnetConfig::initialize(); c=BnetConfig::get();
   C(c.pvzAllinProbeCap==0 && c.pvzPoolFirstCannons==2);

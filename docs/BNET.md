@@ -286,7 +286,7 @@ below probe production. Army at the end: 2 zealots, 1 dragoon; 27 of 30 trained 
 | `pvz_antiallin_fix` | `true` | Master switch for the keys below. |
 | `pvz_allin_base_lings` | `6` | Once the opening is known (pool or hatchery first), this many zerglings at our main / natural before frame 9000 confirm `ZerglingAllIn`. `0` = off (0-30). |
 | `pvz_allin_seen_lings` | `12` | Same with this many living zerglings known anywhere before frame 8000. `0` = off (0-40). |
-| `pvz_pool_first_cannons` | `3` | FFE wall cannons once `PoolBeforeHatchery` or `ZerglingAllIn` is recognized (upstream 2). The third cannon is timed for frame 4500, further ones +1000 frames each. The upstream all-in schedule (up to 5 by frame 6000) still applies on top (2-5). |
+| `pvz_pool_first_cannons` | `2` | FFE wall cannons once `PoolBeforeHatchery` or `ZerglingAllIn` is recognized. Capped at 2 on every map (a configured 3 or higher is clamped to 2). The early all-in schedule no longer adds a 3rd–5th cannon. |
 | `pvz_pool_first_zealots` | `2` | `FFEDragoons`: minimum zealots vs. pool first, at base-defense priority (0-6). |
 | `pvz_allin_zealots` | `4` | `FFEDragoons` during `ZerglingAllIn`: minimum zealots, or one per three known zerglings (at most 8), requested above probe production (`PRIORITY_EMERGENCY + 1`) (0-12). |
 | `pvz_allin_probe_cap` | `18` | FFE play during `ZerglingAllIn`: probe goals above this count move to main-army priority, below the zealots. `0` = off; otherwise 12-40. |
@@ -294,7 +294,18 @@ below probe production. Army at the end: 2 zealots, 1 dragoon; 27 of 30 trained 
 - The extra all-in confirmation latches until frame 10000 (or until lair tech, which upstream already turns into `Lair`), so the measures do not flicker when the lings step out of vision. It adds to the upstream rules and never removes them.
 - `FFEDragoons` still does not switch to `AntiAllIn` (that strategy defends the main and would abandon the natural nexus and wall); the measures stay inside the FFE.
 - Log: `[EVENT] pvz_allin_detect lings_at_bases=.. lings_alive=.. from=..` when the extra rule fires, and `[EVENT] pvz_defense enemy=.. wall_cannons=.. min_zealots=.. probe_cap=..` whenever the FFEDragoons defense targets change. An unknown `forced_pvz_opening` writes `[EVENT] forced_pvz_opening_unknown`.
-- Not changed: zergling recognition before the opening is known, `ZerglingRush` handling (the FFE play already cancels the natural and defends the main), other PvZ strategies, unit micro.
+- Not changed: zergling recognition before the opening is known, `ZerglingRush` handling (the FFE play already cancels the natural and defends the main).
+
+## PvZ vs. hydralisks (2026-11-15 Attitude SE 2.1)
+
+Loss in 16:06 (`bnet-pluto@04ef5e01`, opponent `niceheadsub`). The log stays `PoolBeforeHatchery` from 1:40 until `Lair` at 11:24, records `Zerg_Hydralisk_Den` at 9:16, and never records a spire or a mutalisk. The replay's build commands are the evidence for the behavior below. None of it checks the map name.
+
+- Early anti-ling cannons are capped at 2. Once the pool-first opening is known, the gateway and its zealot are requested before the natural nexus.
+- When a hydralisk den or hydralisk is known and a spire or mutalisk is not: no further mineral-line cannons at the main or natural nexus; more cannons at the forge-gateway wall (up to 4) and one at the main choke.
+- Same condition, gas order: citadel, leg speed as soon as the citadel finishes, templar archives, psionic storm, high templars. A stargate is not queued ahead of the citadel. The zealot share of the zealot+dragoon army is at least half.
+- One probe scouts at the start on every map. Later expansion scouting requests a zealot, or an observer if one is already built, not another probe.
+- +1 ground weapons is requested at base-defense priority once the forge is complete.
+- A cluster does not attack a larger local hydralisk/lurker force with 1–3 dragoons and no zealot or high templar. A zealot+dragoon mix (high templars included) attacks only when `2*zealots + dragoons + 4*templars` is at least the hydra count. Dragoon-only groups need twice the hydras.
 
 ## PvP vs. shuttle / reaver and gas-blocked expansion (2026-11-15 Radeon 1.2 replay)
 

@@ -405,10 +405,15 @@ namespace
         CHECK(!pvzAllInLatchActive(5700, 10000));
         CHECK(!pvzAllInLatchActive(5700, 100));                     // new game started (frame went back)
 
-        CHECK(pvzWallCannonTarget(true, true, 3) == 3);
+        CHECK(pvzWallCannonTarget(true, true, 3) == 2);   // early anti-ling cap
+        CHECK(pvzWallCannonTarget(true, true, 5) == 2);
         CHECK(pvzWallCannonTarget(true, false, 3) == 2);
         CHECK(pvzWallCannonTarget(false, true, 5) == 2);
         CHECK(pvzWallCannonTarget(true, true, 2) == 2);
+
+        CHECK(pvzGatewayBeforeNexus(true, true));
+        CHECK(!pvzGatewayBeforeNexus(true, false));
+        CHECK(!pvzGatewayBeforeNexus(false, true));
 
         CHECK(pvzMinZealots(true, true, false, 2, 4, 30) == 2);
         CHECK(pvzMinZealots(true, false, false, 2, 4, 30) == 0);
@@ -444,6 +449,40 @@ namespace
         CHECK(pvzNextGasTech(true, 200, true, true, true, true, false) == PvzGasTech::Archives);
         CHECK(pvzNextGasTech(true, 858, true, true, true, true, true) == PvzGasTech::None);
         CHECK(pvzNextGasTech(false, 858, false, false, false, false, false) == PvzGasTech::None);
+
+        // Hydras confirmed, mutalisks not: citadel before a stargate, then leg speed, archives, storm, templar.
+        CHECK(pvzHydraNotMuta(true, false));
+        CHECK(!pvzHydraNotMuta(true, true));
+        CHECK(!pvzHydraNotMuta(false, false));
+        CHECK(!pvzNexusCannons(true, false));
+        CHECK(pvzNexusCannons(true, true));
+        CHECK(pvzNexusCannons(false, false));
+        CHECK(pvzEntranceCannonTarget(true, false, 2) == 4);
+        CHECK(pvzEntranceCannonTarget(true, false, 5) == 5);
+        CHECK(pvzEntranceCannonTarget(false, false, 2) == 2);
+        CHECK(pvzHydraZealotRatio(false, 0.1) == 0.1);
+        CHECK(pvzHydraZealotRatio(true, 0.1) == 0.5);
+        CHECK(pvzHydraZealotRatio(true, 0.8) == 0.8);
+
+        CHECK(pvzNextGasTech(true, 150, true, true, false, false, false, true) == PvzGasTech::Citadel);
+        CHECK(pvzNextGasTech(true, 100, true, true, false, true, false, true, false) == PvzGasTech::None);
+        CHECK(pvzNextGasTech(true, 150, true, true, false, true, false, true, true, false) == PvzGasTech::LegSpeed);
+        CHECK(pvzNextGasTech(true, 200, true, true, false, true, false, true, true, true) == PvzGasTech::Archives);
+        CHECK(pvzNextGasTech(true, 200, true, true, false, true, true, true, true, true, false) == PvzGasTech::None);
+        CHECK(pvzNextGasTech(true, 200, true, true, false, true, true, true, true, true, true, false) == PvzGasTech::Storm);
+        CHECK(pvzNextGasTech(true, 150, true, true, false, true, true, true, true, true, true, true, false) == PvzGasTech::HighTemplar);
+        CHECK(pvzNextGasTech(true, 500, true, true, false, true, true, true, true, true, true, true, true) == PvzGasTech::None);
+
+        // 2-3 dragoons do not walk into more hydras. A zealot+dragoon mix attacks only when it is large enough.
+        CHECK(!pvzTakeHydraFight(0, 2, 0, 8));
+        CHECK(!pvzTakeHydraFight(0, 3, 0, 4));
+        CHECK(pvzTakeHydraFight(0, 2, 0, 1));
+        CHECK(!pvzTakeHydraFight(0, 8, 0, 5));
+        CHECK(pvzTakeHydraFight(0, 8, 0, 4));
+        CHECK(!pvzTakeHydraFight(2, 2, 0, 11));
+        CHECK(pvzTakeHydraFight(4, 4, 0, 10));
+        CHECK(pvzTakeHydraFight(0, 2, 1, 6));
+        CHECK(pvzTakeHydraFight(0, 0, 0, 0));
     }
 
     void testCombatFix()
