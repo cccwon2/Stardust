@@ -8,6 +8,10 @@
 #include "Workers.h"
 #include "Opponent.h"
 #include "OpponentEconomicModel.h"
+#include "BnetConfig.h"
+#include "BnetPolicy.h"
+#include "BnetLog.h"
+#include "General.h"
 
 #include "Plays/Macro/HiddenBase.h"
 #include "Plays/Macro/SaturateBases.h"
@@ -25,6 +29,25 @@
 namespace
 {
     std::map<BWAPI::UnitType, int> emptyUnitCountMap;
+
+    // pvp_robo_fix: enemy robotics tech / shuttle-reaver drop threat (2026-11-15 Radeon replay)
+    bool pvpRoboTechSeen()
+    {
+        return BnetPolicy::pvpRoboTechSeen(BnetConfig::get().pvpRoboFix,
+                                           Units::hasEnemyBuilt(BWAPI::UnitTypes::Protoss_Robotics_Facility),
+                                           Units::hasEnemyBuilt(BWAPI::UnitTypes::Protoss_Robotics_Support_Bay),
+                                           Units::hasEnemyBuilt(BWAPI::UnitTypes::Protoss_Observatory),
+                                           Units::hasEnemyBuilt(BWAPI::UnitTypes::Protoss_Shuttle),
+                                           Units::hasEnemyBuilt(BWAPI::UnitTypes::Protoss_Reaver));
+    }
+
+    bool pvpDropThreat()
+    {
+        return BnetPolicy::pvpDropThreat(BnetConfig::get().pvpRoboFix,
+                                         Units::hasEnemyBuilt(BWAPI::UnitTypes::Protoss_Robotics_Support_Bay),
+                                         Units::hasEnemyBuilt(BWAPI::UnitTypes::Protoss_Shuttle),
+                                         Units::hasEnemyBuilt(BWAPI::UnitTypes::Protoss_Reaver));
+    }
 }
 
 void PvP::initialize(std::vector<std::shared_ptr<Play>> &plays, bool transitioningFromRandom, const std::string &openingOverride)
@@ -337,7 +360,27 @@ void PvP::updatePlays(std::vector<std::shared_ptr<Play>> &plays)
         }
     }
 
-    updateDefendBasePlays(plays);
+    // pvp_home_guard_dragoons: keep dragoons at the main once a shuttle / reaver drop is possible. Upstream PvP had no
+    // home guard, so in the Radeon replay the whole army was at the enemy natural when the reaver drop hit our main.
+    int homeGuardValue = 0;
+    {
+        auto &bnetConfig = BnetConfig::get();
+        bool dropThreat = pvpDropThreat();
+        if (dropThreat && bnetConfig.pvpHomeGuardDragoons > 0)
+        {
+            homeGuardValue = BnetPolicy::homeGuardValue(bnetConfig.pvpHomeGuardDragoons,
+                                                        CombatSim::unitValue(BWAPI::UnitTypes::Protoss_Zealot));
+        }
+        if (dropThreat != bnetDropThreat)
+        {
+            bnetDropThreat = dropThreat;
+            BnetLog::event(std::string("pvp_drop_threat ") + (dropThreat ? "start" : "end")
+                           + " home_guard_dragoons=" + std::to_string(bnetConfig.pvpHomeGuardDragoons)
+                           + " drop_cannons=" + std::to_string(bnetConfig.pvpDropCannons));
+        }
+    }
+
+    updateDefendBasePlays(plays, homeGuardValue);
     updateSpecialTeamsPlays(plays);
     defaultExpansions(plays);
     scoutExpos(plays, 12000);
@@ -350,6 +393,12 @@ void PvP::updateProduction(std::vector<std::shared_ptr<Play>> &plays,
     reserveMineralsForExpansion(mineralReservations);
     handleNaturalExpansion(plays, prioritizedProductionGoals);
     handleDetection(prioritizedProductionGoals);
+
+    // pvp_drop_cannons: main mineral line cannons (and upstream's two at a completed natural) vs. shuttle / reaver drops
+    if (bnetDropThreat && BnetConfig::get().pvpDropCannons > 0)
+    {
+        buildDefensiveCannons(prioritizedProductionGoals, false, 0, BnetConfig::get().pvpDropCannons);
+    }
 
     if (handleIslandExpansionProduction(plays, prioritizedProductionGoals)) return;
 
@@ -764,6 +813,49 @@ void PvP::handleNaturalExpansion(std::vector<std::shared_ptr<Play>> &plays,
             // In this case we want to expand when we consider it safe to do so: we have an attacking or containing army
             // that is close to the enemy base
 
+            // pvp_natural_fix: expand when gas blocked / floating minerals and keep an incomplete natural that is not
+            // threatened, independent of the attack squad (2026-11-15 Radeon replay: one gas all game, natural nexus
+            // cancelled at 9:22 when the army went home and never retaken)
+            {
+                auto &bnetConfig = BnetConfig::get();
+                int naturalFrameForFix = 10000;
+                if (Map::mapSpecificOverride()->hasBackdoorNatural()) naturalFrameForFix = 6500;
+                else if (enemyStrategy == ProtossStrategy::DragoonAllIn) naturalFrameForFix = 12000;
+
+                int enemyValueAtNatural = 0;
+                for (const auto &unit : Units::enemyAtBase(natural))
+                {
+                    if (!UnitUtil::IsCombatUnit(unit->type) || !UnitUtil::CanAttackGround(unit->type)) continue;
+                    enemyValueAtNatural += CombatSim::unitValue(unit);
+                }
+
+                BnetPolicy::PvpNaturalInput in{
+                        bnetConfig.pvpRoboFix && bnetConfig.pvpNaturalFix,
+                        underConstruction,
+                        currentFrame,
+                        naturalFrameForFix,
+                        BWAPI::Broodwar->self()->minerals(),
+                        BWAPI::Broodwar->self()->gas(),
+                        bnetConfig.pvpReexpandFrame,
+                        bnetConfig.pvpReexpandMinerals,
+                        enemyValueAtNatural,
+                        2 * CombatSim::unitValue(BWAPI::UnitTypes::Protoss_Dragoon)};
+                auto reason = BnetPolicy::pvpNaturalOverride(in);
+                if (reason != BnetPolicy::PvpNaturalReason::None)
+                {
+                    if ((int)reason != bnetNaturalReason)
+                    {
+                        bnetNaturalReason = (int)reason;
+                        BnetLog::event(std::string("pvp_natural_take reason=") + BnetPolicy::pvpNaturalReasonName(reason)
+                                       + " minerals=" + std::to_string(in.minerals) + " gas=" + std::to_string(in.gas)
+                                       + " enemy_value=" + std::to_string(enemyValueAtNatural));
+                    }
+                    CherryVis::setBoardValue("natural", std::string("bnet-") + BnetPolicy::pvpNaturalReasonName(reason));
+                    takeNaturalExpansion(plays, prioritizedProductionGoals);
+                    return;
+                }
+            }
+
             // Check for an attack play first - if we don't have one, we will cancel a constructing natural nexus
             // Exception is if our attack play went defensive because an observer isn't close enough to detect a DT
             auto mainArmyPlay = getPlay<AttackEnemyBase>(plays);
@@ -1017,6 +1109,20 @@ void PvP::handleDetection(std::map<int, std::vector<ProductionGoal>> &prioritize
         }
         buildObserver();
         CherryVis::setBoardValue("detection", "emergency-build-cannon-and-observer");
+        return;
+    }
+
+    // pvp_robo_observer: the enemy has robotics tech (reavers / shuttles / observers), so get our own observer now.
+    // Upstream waited for a second gas, which never came in the Radeon replay (5 reavers, no observer all game).
+    if (BnetConfig::get().pvpRoboObserver && pvpRoboTechSeen())
+    {
+        if (!bnetRoboSeen)
+        {
+            bnetRoboSeen = true;
+            BnetLog::event("pvp_robo_observer requested");
+        }
+        CherryVis::setBoardValue("detection", "bnet-enemy-robo-observer");
+        buildObserver();
         return;
     }
 

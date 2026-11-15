@@ -75,6 +75,19 @@
   "pvz_allin_zealots": 4,
   "pvz_allin_probe_cap": 18,
 
+  "pvp_robo_fix": true,
+  "pvp_natural_fix": true,
+  "pvp_reexpand_frame": 12000,
+  "pvp_reexpand_minerals": 400,
+  "pvp_robo_observer": true,
+  "pvp_home_guard_dragoons": 2,
+  "pvp_drop_cannons": 1,
+
+  "arrived_move_hold_frames": 48,
+  "arrived_move_tolerance_px": 16,
+  "resource_fail_backoff_frames": 24,
+  "supply_drop_event": 20,
+
   "print_build_info": true,
   "bnet_log": true
 }

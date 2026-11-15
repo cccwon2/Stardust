@@ -88,6 +88,17 @@ int main(){
   C(c.plutoRescoutFrame==12000 && c.plutoRescoutMaxFrames==240 && c.midgameStrategyHoldFrames==2400 && !c.invalidMoveGuard);
   w("{\"blind_main_cannon_frame\": 0, \"pluto_rescout_frame\": -1}"); BnetConfig::initialize(); c=BnetConfig::get();
   C(c.blindMainCannonFrame==0 && c.plutoRescoutFrame==0);
+  // PvP robo / command volume keys: defaults and clamping
+  w("{}"); BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.pvpRoboFix && c.pvpNaturalFix && c.pvpReexpandFrame==12000 && c.pvpReexpandMinerals==400 && c.pvpRoboObserver);
+  C(c.pvpHomeGuardDragoons==2 && c.pvpDropCannons==1 && c.arrivedMoveHoldFrames==48 && c.arrivedMoveTolerancePx==16);
+  C(c.resourceFailBackoffFrames==24 && c.supplyDropEvent==20);
+  w("{\"pvp_robo_fix\": false, \"pvp_reexpand_frame\": 100, \"pvp_reexpand_minerals\": 9, \"pvp_home_guard_dragoons\": 9, \"pvp_drop_cannons\": 7, \"arrived_move_hold_frames\": 999, \"arrived_move_tolerance_px\": -4, \"resource_fail_backoff_frames\": 999, \"supply_drop_event\": -1}");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(!c.pvpRoboFix && c.pvpReexpandFrame==6000 && c.pvpReexpandMinerals==150 && c.pvpHomeGuardDragoons==4 && c.pvpDropCannons==2);
+  C(c.arrivedMoveHoldFrames==240 && c.arrivedMoveTolerancePx==0 && c.resourceFailBackoffFrames==240 && c.supplyDropEvent==0);
+  w("{\"pvp_reexpand_frame\": 0, \"arrived_move_hold_frames\": 0}"); BnetConfig::initialize(); c=BnetConfig::get();
+  C(c.pvpReexpandFrame==0 && c.arrivedMoveHoldFrames==0);
   printf("%s\n", BnetConfig::summary().c_str());
   printf("fails=%d\n",fails); return fails;
 }

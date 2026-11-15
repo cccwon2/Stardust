@@ -99,6 +99,21 @@ namespace BnetConfig
         bool dropRiskDetection = true;          // Starport / control tower / dropship seen early -> treat as drop risk
         int midgameStrategyHoldFrames = 480;    // MidGameMech / Bio / BioMech switches need this many frames since the last change
 
+        // PvP vs. robo / shuttle-reaver and gas-blocked expansion (2026-11-15 Radeon replay)
+        bool pvpRoboFix = true;                 // Master switch for the PvP changes below
+        bool pvpNaturalFix = true;              // Expand when gas blocked / floating minerals; keep a safe incomplete natural
+        int pvpReexpandFrame = 12000;           // From this frame, take the natural when minerals >= pvp_reexpand_minerals. 0 = off
+        int pvpReexpandMinerals = 400;
+        bool pvpRoboObserver = true;            // Enemy robo tech seen -> observer without waiting for a second gas
+        int pvpHomeGuardDragoons = 2;           // Dragoons kept at the main once a shuttle / reaver / support bay is seen. 0 = off
+        int pvpDropCannons = 1;                 // Main mineral line cannons once a shuttle / reaver / support bay is seen (0-2)
+
+        // Command volume / resource order failures
+        int arrivedMoveHoldFrames = 48;         // Non-worker unit at its move target: same move not re-sent for N frames. 0 = off
+        int arrivedMoveTolerancePx = 16;        // ... when the new target is within this distance of the last one
+        int resourceFailBackoffFrames = 24;     // Worker resource order rejected by BWAPI: no resource order for N frames. 0 = off
+        int supplyDropEvent = 20;               // [EVENT] supply_drop when supply falls by >= N within 30 game seconds. 0 = off
+
         // Phase 3: Lightweight log
         bool printBuildInfo = true;             // Local-only in-game message at game start: build id and config source
         bool bnetLog = true;                    // Write one-line summaries to bwapi-data/write/stardust_bnet.log

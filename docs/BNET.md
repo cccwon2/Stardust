@@ -289,6 +289,54 @@ below probe production. Army at the end: 2 zealots, 1 dragoon; 27 of 30 trained 
 - Log: `[EVENT] pvz_allin_detect lings_at_bases=.. lings_alive=.. from=..` when the extra rule fires, and `[EVENT] pvz_defense enemy=.. wall_cannons=.. min_zealots=.. probe_cap=..` whenever the FFEDragoons defense targets change. An unknown `forced_pvz_opening` writes `[EVENT] forced_pvz_opening_unknown`.
 - Not changed: zergling recognition before the opening is known, `ZerglingRush` handling (the FFE play already cancels the natural and defends the main), other PvZ strategies, unit micro.
 
+## PvP vs. shuttle / reaver and gas-blocked expansion (2026-11-15 Radeon 1.2 replay)
+
+Loss in 16:20 (`bnet-pluto@32a56cdb`) to a Protoss that went robo 3:41, reaver 5:19, scarab upgrade 6:02, shuttle 6:50
+(5 reavers, later high templar). Our bot built one assimilator all game (1:37), 50 dragoons, 1 zealot and no robotics /
+observer. The scout probe was gone by about 3:42, so `EarlyRobo` was never recognized (strategy path
+Unknown -> ProxyRush -> OneZealotCore -> NoZealotCore -> MidGame at frame 14000). The army attacked the enemy natural at
+7-8 min; our natural nexus started 8:29, a reaver drop hit our main about 9:00, the incomplete natural was cancelled at
+9:22 and never retaken; supply went from 57 (8:03) to 17 (10:04).
+
+Causes in upstream PvP: the gas-blocked expansion check sits after "attack squad has 5+ units beyond the natural"; without
+an attack play an incomplete natural is cancelled; the macro observer needs a second completed assimilator (or two nexus
+after frame 10000); PvP had none of the PvT home guard / drop measures.
+
+| Key | Default | Description |
+|---|---|---|
+| `pvp_robo_fix` | `true` | Master switch for the PvP keys below. |
+| `pvp_natural_fix` | `true` | In the `Normal` / `ThreeGateRobo` / `MidGame` natural logic, before the upstream checks: an incomplete natural is kept (not cancelled) while enemy combat value at the natural is below two dragoons; from the upstream natural frame (10000, 6500 with a backdoor natural, 12000 vs. dragoon all-in) the natural is taken when gas blocked (minerals > 500, gas < 100) without needing an attack squad. With enemies at the natural the upstream logic decides. `[EVENT] pvp_natural_take reason=keep_incomplete|gas_blocked|mineral_float` when the reason changes. |
+| `pvp_reexpand_frame` / `pvp_reexpand_minerals` | `12000` / `400` | From this frame (about 8:20) the natural is also taken (or retaken after a cancel) whenever minerals >= the threshold and it is not threatened. `0` = off (6000-30000; minerals 150-2000). |
+| `pvp_robo_observer` | `true` | Robotics facility, support bay, observatory, shuttle or reaver seen -> one observer requested at upstream detection priority, without waiting for a second gas. `[EVENT] pvp_robo_observer requested` once. |
+| `pvp_home_guard_dragoons` | `2` | Support bay, shuttle or reaver seen -> enemy value floor for our main passed to `updateDefendBasePlays` (same mechanism as the PvT `home_guard_dragoons`), so about this many units stay home while the army attacks. `[EVENT] pvp_drop_threat start`. `0` = off (0-4). |
+| `pvp_drop_cannons` | `1` | Same trigger -> `buildDefensiveCannons(atChoke=false, atBases=N)`: N cannons in the main mineral line and, as upstream does for this helper, two at a completed natural. `0` = off (0-2). |
+
+Not changed: PvP enemy strategy recognition (no new enum; `EarlyRobo` still needs a robo before frame 7500), unit micro vs.
+reavers / scarabs, our own robo tech choice. Not verified: Windows build and in-game effect; the home guard depends on
+DefendBase scheduling (only while the main army is attacking).
+
+## Command volume and resource order failures (2026-11-15 replays)
+
+- Replay analysis (Radeon PvP): 16,128 of our move orders, 9,617 to the same target (within 64px) as the unit's previous
+  command, mostly 4-19 frames apart. Upstream `MyUnitImpl::move` resends a near-identical move once the unit has stopped
+  moving and more than `latency + 3` frames have passed, so units standing at their target were re-ordered every few frames.
+- `arrived_move_hold_frames` / `arrived_move_tolerance_px` (`48` / `16`): a non-worker unit within
+  `move_guard_min_remaining_px` of its last move target is not sent a move to within 16px of that target again until 48
+  frames have passed. Force, stuck units and other targets are unaffected. Counter `arrived_holds`. `0` = off.
+- Attitude PvZ log: `res_attempts` 2,067 vs. `res_issued` 188 + blocked 53, i.e. about 1,826 resource commands rejected by
+  BWAPI that were not counted anywhere. Now counted as `res_failed`; the first 3 and every 500th write
+  `[EVENT] res_failed cmd=gather|return_cargo|right_click unit=.. order=.. error=".." count=..` with the BWAPI error.
+- `resource_fail_backoff_frames` (`24`): after a rejected resource command the worker gets no guarded resource command for
+  this many frames (`res_blocked_backoff`). `0` = off. The root cause of the rejections is still unknown; the error field is
+  meant to identify it.
+- `supply_drop_event` (`20`): `[EVENT] supply_drop from=.. to=.. window_s=30 workers=..` when our supply falls by at least
+  this much within 30 game seconds (at most once per 30 s). `0` = off.
+- Other new events (all matchups): `enemy_tech_seen type=..` once per tech type (robo, support bay, observatory, shuttle,
+  reaver, citadel, archives, DT, HT, stargate, arbiter, carrier, factory, starport, dropship, tank, vessel, lair, spire,
+  hydra den, lurker, mutalisk), `build_cancel type=.. tile=.. hp=..` when the builder cancels a started building (e.g. the
+  natural nexus), `build_cancel_dying type=..` for dying incomplete buildings. `[APM]` now also has `minerals=`, `gas=`
+  (amounts), `depots=` and `refineries=` (completed counts).
+
 ## Stacked-mineral start bases (2026-11-15 OdysseyRE 2.0)
 
 - Symptom: on (2)OdysseyRE 2.0 the log stops right after `[START]`; the bridge reports `AI host operation onStart failed with Windows exception 0xc0000005` and quarantines the runtime. The quarantine lasts until StarCraft is restarted, so every later game in the same StarCraft process looks like "probes do nothing" even on normal maps.
@@ -342,9 +390,10 @@ below probe production. Army at the end: 2 zealots, 1 dragoon; 27 of 30 trained 
 - `mech_to_attack` / `mech_to_regroup`: like `bio_*`, while the mech scales are active. `mech_gate_blocks`: times the mech expansion gate switched to blocked; each switch also writes `[EVENT] mech_expand_gate=blocked|open bases=.. army=.. required=..`.
 - `latency_max` / `cmd_interval`: highest latency seen so far and the effective command interval.
 - `bwapi_apm`: `BWAPI::Game::getAPM(false)` (selections excluded), sampled when the `[APM]` line is written. BWAPI computes it with an exponential decay (APMAlert formula, time constant about 0.95 minutes), so it reflects roughly the last minute of play, not a game average and not our own command count. `bwapi_apm_at_end` is the same value at game end; `bwapi_apm_max_sampled` is the maximum over the 2-minute samples (short spikes between samples are not captured). Older logs used `apm`, `avg_apm` and `max_sampled_apm` for these values.
-- `res_*`: cumulative counts (since game start) of resource commands (gather / return cargo / resource right-click) for workers in simple gather mode only, i.e. where the Battle.net guards apply. `res_attempts` = calls reaching the guard; `res_issued` = commands BWAPI accepted; `res_blocked_interval` = same command to the same target within `min_command_interval_frames`; `res_blocked_already` = already moving to / waiting at / mining the target, or already returning cargo; `res_blocked_budget` = `max_orders_per_frame` exhausted. Attempts that BWAPI itself rejects are counted in `res_attempts` only. Optimized-mining workers and recovery commands are not counted here.
+- `res_*`: cumulative counts (since game start) of resource commands (gather / return cargo / resource right-click) for workers in simple gather mode only, i.e. where the Battle.net guards apply. `res_attempts` = calls reaching the guard; `res_issued` = commands BWAPI accepted; `res_blocked_interval` = same command to the same target within `min_command_interval_frames`; `res_blocked_already` = already moving to / waiting at / mining the target, or already returning cargo; `res_blocked_budget` = `max_orders_per_frame` exhausted; `res_blocked_backoff` = worker in `resource_fail_backoff_frames`; `res_failed` = commands BWAPI rejected (before this change they were counted in `res_attempts` only). Optimized-mining workers and recovery commands are not counted here.
 - `stuck_*`: cumulative stuck-worker recovery counts: `stuck_attempts` (recoveries started), `stuck_reassign` (successful reassignment to a different patch), `stuck_cmd_ok` / `stuck_cmd_failed` (recovery gather accepted / rejected by BWAPI), `stuck_budget_deferred` (postponed because the per-frame budget was exhausted).
 - `bio_to_attack` / `bio_to_regroup`: cumulative attack <-> regroup transitions of attack-base squads, counted only while the MidGameBio scales are active (Terran opponent recognized as `MidGameBio` with `pluto_pvt_snipe` on). Repeated decisions in the same state are not counted.
+- `arrived_holds`: moves skipped by `arrived_move_hold_frames`. `minerals` / `gas` / `depots` / `refineries` (`[APM]` only): current resources and completed resource depots / refineries.
 - `invalid_moves` / `worker_flees`: moves rejected by `invalid_move_guard` and workers that started fleeing a vulture. `[EVENT] previous_game_unfinished`: the previous game never wrote `[END]`.
 - `[EVENT] detection_stage`: the first-observer request stage changed; the line lists the inputs that drove the decision. `first_observer_complete` is written once, on the first frame a completed observer exists (PvT only). `cannon_issue` is written once per distinct cannon placement problem. `opponent_left` and `surrender` are unchanged.
 - The log compiles with `TOURNAMENT_BUILD=ON` (CMake `BNET_LOG`, default `ON`) and can be turned off at runtime with `bnet_log`. The counters are kept even when the log is disabled, but are not written anywhere.

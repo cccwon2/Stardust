@@ -180,6 +180,8 @@ void MyUnitImpl::update(BWAPI::Unit unit)
         (lastShields + lastHealth) < 20)
     {
         Log::Get() << "Cancelling dying " << type << " @ " << getTilePosition();
+        BnetLog::event("build_cancel_dying type=" + type.getName() + " tile=" + std::to_string(getTilePosition().x) + ","
+                       + std::to_string(getTilePosition().y));
         bwapiUnit->cancelConstruction();
     }
 }

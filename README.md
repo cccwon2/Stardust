@@ -5,7 +5,7 @@ AI for StarCraft: Brood War
 
 이 포크는 StarCraft: Remastered Battle.net의 지연 환경에서 채취 안정성과 명령량(APM)을 개선하고, Pluto 스타일 테란과 사람 상대의 초반 러시에 대응하기 위한 프로토스 봇입니다. 작업 브랜치는 `bnet-pluto`이며 검토된 변경은 `main`에 병합합니다. 원작은 [bmnielsen/Stardust](https://github.com/bmnielsen/Stardust)입니다.
 
-문서 기준: 2026-11-16 KST, 코드 커밋 [`c9fe8ad`](../../commit/c9fe8add) (PR #8까지). 구현 상세·전체 설정·제한 사항은 [Battle.net 가이드](docs/BNET.md), 기본값은 [JSON 템플릿](config/stardust_bnet.json)을 참고하세요.
+문서 기준: 2026-11-15 KST, 코드 커밋 [`a359126`](../../commit/a359126d) (PR #15까지). 구현 상세·전체 설정·제한 사항은 [Battle.net 가이드](docs/BNET.md), 기본값은 [JSON 템플릿](config/stardust_bnet.json)을 참고하세요.
 
 ### 구현 단계와 최신 변경
 
@@ -30,8 +30,14 @@ AI for StarCraft: Brood War
 | `6e6d881` (PR #6) | 게임 시작 시 빌드 ID(`브랜치@커밋`)와 설정 파일 경로 표시(`print_build_info`), `[START]`에 `build=` 기록 |
 | `5805b1b` (PR #7) | Move·Stop 과다 감소(경로 웨이포인트 유지, 군대·옵저버 재전송 간격, 스테이시스·언로드 반복 방지, 갇힌 일꾼 대기 증가). 메카닉·벌처 위협 시 앞마당 캐논 2기, 세 번째 이후 확장마다 캐논 1기 |
 | `c9fe8ad` (PR #8) | 저그전 오프닝 고정(`forced_pvz_opening`), 저글링 올인 조기 확정, 선풀 시 포지 더블 입구 캐논 3기·최소 질럿, 올인 중 프로브 생산 제한 |
+| `6b592e2` (PR #9, #10) | README 갱신, `bnet-pluto`를 `main`에 동기화(PR #4-#9) |
+| `85c3856` (PR #11) | 테란전 교전: 실제 지연(최대 관측값) 기반 마이크로, 공격 시작 후 유지(`attack_commit_frames`), 후퇴 판단 안정화, 빠른 추격자(벌처) 상대 도주 대신 교전(`flee_guard`) |
+| `b9bc2d4` (PR #12) | 본진 미네랄이 겹친 맵(OdysseyRE 2.0)에서 `onStart` 크래시 수정(BWEM 시작 기지 대체 매칭) |
+| `95cac3e` (PR #13) | 한글 등 비 ASCII 상대 이름에서 `onStart` 예외 수정(상대 파일 키를 ASCII로 변환) |
+| `1b31cee` (PR #14) | 테란전 벌처 드랍·마인 대응: 잘못된 좌표 이동 차단, 일꾼 피신, 본진 캐논, 홈 가드, 옵저버 긴급 생산, 3:20 재정찰, 드랍 위험 인식 |
+| `a359126` (PR #15) | 프로토스전 리버·셔틀 대응: 가스 부족·자원 누적 시 앞마당 확장, 위협 없는 건설 중 앞마당 유지, 적 로보 확인 시 옵저버, 드랍 위협 시 홈 가드·본진 캐논. 도착한 유닛 반복 이동 억제(`arrived_move_hold_frames`), BWAPI 거부 자원 명령 집계·백오프, 보급 급감·적 테크·건물 취소 로그 |
 
-종족별 적용 범위: 채취 안정화와 이동 명령 감소(PR #7)는 상대 종족과 무관하게 지연이 4프레임을 넘는 환경(배틀넷)에서 동작합니다. 캐논 보강과 메카닉 대응은 테란전, 올인 대응은 저그전에만 적용됩니다. 프로토스전은 원작 로직을 사용합니다.
+종족별 적용 범위: 채취 안정화와 이동 명령 감소(PR #7, #15)는 상대 종족과 무관하게 지연이 4프레임을 넘는 환경(배틀넷)에서 동작합니다(`arrived_move_hold_frames`, 잘못된 좌표 차단, 자원 명령 백오프는 지연과 무관하게 동작). 캐논 보강·메카닉·교전·벌처 대응은 테란전, 올인 대응은 저그전, 리버·셔틀 대응과 가스 부족 확장(PR #15)은 프로토스전에만 적용됩니다. 그 밖의 프로토스전 운영은 원작 로직입니다.
 
 ### Windows 빌드와 배포
 
@@ -110,6 +116,15 @@ powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 | `bio_attack_start_scale` | `0.7` | MidGameBio 상대 공격 시작 배율 |
 | `bio_attack_continue_scale` | `1.0` | 공격 유지 배율; 기본값은 원작 유지 판단 |
 | `bio_attack_resume_scale` | `0.7` | 재집결 후 공격 재개 배율 |
+| `pvp_robo_fix` | `true` | 프로토스전 리버·셔틀 대응 스위치 |
+| `pvp_natural_fix` | `true` | 앞마당에 적 병력(드라군 2기 가치 이상)이 없으면 건설 중인 앞마당을 취소하지 않고, 가스 부족(미네랄 500 초과·가스 100 미만) 시 공격 부대 조건 없이 앞마당 확장 |
+| `pvp_reexpand_frame` / `pvp_reexpand_minerals` | `12000` / `400` | 이 프레임(약 8:20)부터 미네랄이 쌓이면 앞마당 확장·재확장; 0은 끔 |
+| `pvp_robo_observer` | `true` | 적 로보틱스·서포트 베이·옵저버터리·셔틀·리버를 보면 두 번째 가스를 기다리지 않고 옵저버 1기 요청 |
+| `pvp_home_guard_dragoons` | `2` | 서포트 베이·셔틀·리버를 보면 본진에 유닛 약 2기 수비 유지; 0은 끔 |
+| `pvp_drop_cannons` | `1` | 같은 조건에서 본진 미네랄 라인 캐논 수(완성된 앞마당에는 원작 헬퍼대로 2기); 0은 끔 |
+| `arrived_move_hold_frames` / `arrived_move_tolerance_px` | `48` / `16` | 목표에 이미 도착한(48px 이내) 비일꾼 유닛에게 16px 이내의 같은 이동을 48프레임 동안 다시 보내지 않음; 0은 끔 |
+| `resource_fail_backoff_frames` | `24` | BWAPI가 자원 명령을 거부한 일꾼에게 이 프레임 동안 자원 명령을 보내지 않음; 0은 끔 |
+| `supply_drop_event` | `20` | 30초 안에 보급이 이만큼 줄면 `[EVENT] supply_drop` 기록; 0은 끔 |
 | `print_build_info` | `true` | 게임 시작 시 빌드 ID(브랜치@커밋)와 설정 파일 경로를 내 화면에만 표시 (printf + 처음 30초 화면 그리기). 배틀넷 브리지에서는 화면에 보이지 않고 브리지 로그에 기록될 수 있음 |
 | `bnet_log` | `true` | 경량 경기 로그 활성화 |
 
@@ -123,16 +138,16 @@ powershell -ExecutionPolicy Bypass -File scripts\build-bnet.ps1
 
 - `[START]`: 빌드 ID, 맵, 상대, 지연 프레임, 설정 파일 경로(`config=`), 실제 적용 설정
 - `[ENEMY]` / `[OURS]`: 적·아군 전략 전환
-- `[EVENT]`: 탐지 요청 단계 전환, 첫 옵저버 완성, 캐논 계획(`cannon_plan`)·배치 문제(`cannon_issue`), 메카닉 확장 게이트, 저그 올인 확정(`pvz_allin_detect`)과 저그전 수비 목표(`pvz_defense`) 등
-- `[APM]`: 2880프레임마다(게임 시간 약 2분) 자체 명령 수(`orders_per_min`, 유닛 종류별 누적), 생략된 이동(`moves_skipped`, `grid_holds`), 반복 명령 생략(`orders_repeat_skipped`), 갇힌 일꾼 대기(`unstick_backoffs`), 지연·명령 간격(`latency_max`, `cmd_interval`)과 기타 누적 카운터
+- `[EVENT]`: 탐지 요청 단계 전환, 첫 옵저버 완성, 캐논 계획(`cannon_plan`)·배치 문제(`cannon_issue`), 메카닉 확장 게이트, 저그 올인 확정(`pvz_allin_detect`)과 저그전 수비 목표(`pvz_defense`), 적 테크 첫 확인(`enemy_tech_seen`), 건물 취소(`build_cancel`), 보급 급감(`supply_drop`), 거부된 자원 명령(`res_failed`), 프로토스전 확장·드랍 대응(`pvp_natural_take`, `pvp_drop_threat`, `pvp_robo_observer`) 등
+- `[APM]`: 2880프레임마다(게임 시간 약 2분) 자체 명령 수(`orders_per_min`, 유닛 종류별 누적), 보유 자원(`minerals`, `gas`)과 완성 기지·가스 건물 수(`depots`, `refineries`), 생략된 이동(`moves_skipped`, `grid_holds`), 반복 명령 생략(`orders_repeat_skipped`), 갇힌 일꾼 대기(`unstick_backoffs`), 지연·명령 간격(`latency_max`, `cmd_interval`)과 기타 누적 카운터
 - `[END]`: 승패, 최종 전략, 종료 APM 및 누적 카운터
 
-명령량은 `orders_per_min`으로 확인하세요. `bwapi_apm`은 Remastered에서 0으로 기록되며, 원래 BWAPI의 감쇠된 최근 APM으로 경기 전체 평균이나 자체 명령 횟수가 아닙니다. `bwapi_apm_at_end`는 종료 시 값, `bwapi_apm_max_sampled`는 주기 표본 중 최대값으로 표본 사이 순간 피크는 놓칠 수 있습니다. `res_*`는 단순 채취 일꾼의 가드 대상 자원 명령만 집계하고, 복구 명령은 `stuck_*`로 별도 집계합니다. `bio_to_attack` / `bio_to_regroup`는 MidGameBio 배율이 적용되는 동안의 실제 상태 전환 횟수입니다. `attack_commit_holds`, `flee_guard_fights`, `dragoon_unsticks`(공격 취소로 멈춘 드라군 Stop), `micro_latency`(실제 적용 지연)는 테란전 교전 수정의 동작 확인용입니다. `invalid_moves`(차단된 잘못된 이동), `worker_flees`(벌처를 피해 피신한 일꾼)는 벌처 대응 수정의 확인용이며, `[EVENT] previous_game_unfinished`는 직전 경기가 `[END]` 없이 끝났음(크래시·강제 종료·연결 끊김)을 뜻합니다.
+명령량은 `orders_per_min`으로 확인하세요. `bwapi_apm`은 Remastered에서 0으로 기록되며, 원래 BWAPI의 감쇠된 최근 APM으로 경기 전체 평균이나 자체 명령 횟수가 아닙니다. `bwapi_apm_at_end`는 종료 시 값, `bwapi_apm_max_sampled`는 주기 표본 중 최대값으로 표본 사이 순간 피크는 놓칠 수 있습니다. `res_*`는 단순 채취 일꾼의 가드 대상 자원 명령만 집계하고(`res_failed`는 BWAPI가 거부한 명령, `res_blocked_backoff`는 거부 후 대기로 생략한 명령), 복구 명령은 `stuck_*`로 별도 집계합니다. `bio_to_attack` / `bio_to_regroup`는 MidGameBio 배율이 적용되는 동안의 실제 상태 전환 횟수입니다. `attack_commit_holds`, `flee_guard_fights`, `dragoon_unsticks`(공격 취소로 멈춘 드라군 Stop), `micro_latency`(실제 적용 지연)는 테란전 교전 수정의 동작 확인용입니다. `invalid_moves`(차단된 잘못된 이동), `worker_flees`(벌처를 피해 피신한 일꾼)는 벌처 대응 수정의 확인용이고, `arrived_holds`는 도착 유닛 반복 이동을 생략한 횟수이며, `[EVENT] previous_game_unfinished`는 직전 경기가 `[END]` 없이 끝났음(크래시·강제 종료·연결 끊김)을 뜻합니다.
 
 코드·문서·빌드 스크립트가 존재하는 것과 실행 검증은 구분합니다.
 
-- 확인됨: [독립 정책 테스트](tools/bnet-policy-test) 234개 검사와 설정 로더 테스트 통과(Linux g++), 변경 소스의 g++ 문법 검사. 사용자 Windows 환경에서 `bnet-pluto@9fabc694` 빌드가 배틀넷 저그전에서 실행되어 새 기본 설정으로 동작하고(`config=defaults`) 2분 시점 `orders_per_min`이 약 100으로 기록됨.
-- 미확인: 벌처 드랍·마인 대응(드랍 위험 인식, 일꾼 피신, 본진 캐논, 홈 가드, 옵저버 긴급 생산, 재정찰)의 Windows 빌드와 실전 효과, PR #8(저그전 올인 대응)의 Windows 빌드와 실전 효과, 중후반 대규모 교전의 명령량, 이동 명령 생략이 드라군 컨트롤에 주는 영향. 승률 향상은 보증하지 않습니다. 기본 전술 수치는 실전 조정의 출발점입니다. 하이템플러 스톰 마이크로는 추가되지 않았고, 경로 추적의 후속 waypoint 이동은 채취 이동 가드 대상이 아닙니다.
+- 확인됨: [독립 정책 테스트](tools/bnet-policy-test) 270개 검사와 설정 로더 테스트 통과(Linux g++), 변경 소스의 g++(C++23) 문법 검사. 사용자 Windows 환경에서 `bnet-pluto@9fabc694` 빌드가 배틀넷 저그전에서 실행되어 2분 시점 `orders_per_min`이 약 100으로 기록됨. `bnet-pluto@32a56cdb` 빌드로 2경기 실행(Attitude SE 2.1 저그전 승리, Radeon 1.2 프로토스전 16:20 패배); 이 두 경기 리플레이·로그 분석이 PR #15의 근거입니다.
+- 미확인: PR #15(프로토스전 리버·셔틀 대응, 도착 유닛 이동 억제, 자원 명령 백오프)의 Windows 빌드와 실전 효과, PR #14(벌처 드랍·마인 대응)와 PR #8(저그 올인 대응)의 실전 효과, Attitude 경기에서 BWAPI가 자원 명령 약 1,826건을 거부한 원인(새 `res_failed` 이벤트로 확인 예정), 중후반 대규모 교전의 명령량, 이동 명령 생략이 드라군 컨트롤에 주는 영향. 승률 향상은 보증하지 않습니다. 기본 전술 수치는 실전 조정의 출발점입니다. 하이템플러 스톰 마이크로와 리버·스캐럽 회피 마이크로는 추가되지 않았고, 프로토스전 적 전략 인식(`EarlyRobo`)은 바뀌지 않았습니다.
 
 ## About
 Stardust is written in C++ and uses [BWAPI](https://github.com/bwapi/bwapi) to play 1v1 Melee games of StarCraft: Brood War. Stardust plays as the Protoss race.

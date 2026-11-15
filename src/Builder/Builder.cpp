@@ -1,4 +1,6 @@
 #include "Building.h"
+#include <sstream>
+#include "BnetLog.h"
 #include "Workers.h"
 #include "Units.h"
 #include "PathFinding.h"
@@ -299,6 +301,13 @@ namespace Builder
             if ((*it)->unit)
             {
                 Log::Get() << "Cancelling construction of " << *(*it)->unit;
+                {
+                    auto &unit = (*it)->unit;
+                    std::ostringstream ev;
+                    ev << "build_cancel type=" << unit->type.getName() << " tile=" << tile.x << "," << tile.y
+                       << " hp=" << (unit->lastHealth + unit->lastShields);
+                    BnetLog::event(ev.str());
+                }
                 (*it)->unit->cancelConstruction();
             }
 
