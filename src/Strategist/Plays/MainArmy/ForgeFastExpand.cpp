@@ -556,12 +556,10 @@ namespace
     {
         if (!Strategist::isEnemyStrategy(PvZ::ZergStrategy::ZerglingAllIn)) return;
 
+        // Early anti-ling cannons stop at 2 on every map. More cannons at the entrance are for confirmed hydras.
         std::vector<BWAPI::TilePosition> cannonPlacementsAvailable;
         int currentCannons = currentWallCannons(prioritizedProductionGoals, cannonPlacementsAvailable);
         if (currentCannons < 2) buildWallCannons(prioritizedProductionGoals, cannonPlacementsAvailable, 2 - currentCannons, 0);
-        if (currentCannons < 3) buildWallCannons(prioritizedProductionGoals, cannonPlacementsAvailable, 1, 4000);
-        if (currentCannons < 4) buildWallCannons(prioritizedProductionGoals, cannonPlacementsAvailable, 1, 5000);
-        if (currentCannons < 5) buildWallCannons(prioritizedProductionGoals, cannonPlacementsAvailable, 1, 6000);
     }
 
     void handleHydraBust(std::map<int, std::vector<ProductionGoal>> &prioritizedProductionGoals)
@@ -686,6 +684,14 @@ void ForgeFastExpand::addPrioritizedProductionGoals(std::map<int, std::vector<Pr
 
     int desiredCannons = 2;
 
+    bool poolFirst = Strategist::isEnemyStrategy(PvZ::ZergStrategy::PoolBeforeHatchery)
+                     || Strategist::isEnemyStrategy(PvZ::ZergStrategy::ZerglingAllIn);
+    bool gatewayFirst = BnetPolicy::pvzGatewayBeforeNexus(
+            BnetConfig::get().pvzAntiAllinFix && BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Zerg,
+            poolFirst);
+    int earlyCannonPriority = gatewayFirst ? (PRIORITY_EMERGENCY + 2) : PRIORITY_DEPOTS;
+    int earlyGatewayPriority = gatewayFirst ? (PRIORITY_EMERGENCY + 5) : PRIORITY_DEPOTS;
+
     bool nexusBlocked = nexusPositionBlocked();
     if (nexusBlocked)
     {
@@ -712,18 +718,34 @@ void ForgeFastExpand::addPrioritizedProductionGoals(std::map<int, std::vector<Pr
                 addBuildingToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Pylon, wall.pylon);
             }
             addBuildingToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Forge, wall.forge);
-            buildWallCannons(prioritizedProductionGoals, cannonPlacementsAvailable, desiredCannons, firstCannonFrame, PRIORITY_DEPOTS);
+            buildWallCannons(prioritizedProductionGoals, cannonPlacementsAvailable, desiredCannons, firstCannonFrame, earlyCannonPriority);
+            if (gatewayFirst)
+            {
+                addBuildingToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Gateway, wall.gateway, 0, earlyGatewayPriority);
+                addUnitToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Zealot, earlyGatewayPriority);
+            }
             addBuildingToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Nexus, Map::getMyNatural()->getTilePosition());
-            addBuildingToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Gateway, wall.gateway);
-            addUnitToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Zealot);
+            if (!gatewayFirst)
+            {
+                addBuildingToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Gateway, wall.gateway);
+                addUnitToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Zealot);
+            }
             break;
         }
         case State::STATE_NEXUS_PENDING:
         {
-            buildWallCannons(prioritizedProductionGoals, cannonPlacementsAvailable, desiredCannons - currentCannons, firstCannonFrame);
+            buildWallCannons(prioritizedProductionGoals, cannonPlacementsAvailable, desiredCannons - currentCannons, firstCannonFrame, earlyCannonPriority);
+            if (gatewayFirst)
+            {
+                addBuildingToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Gateway, wall.gateway, 0, earlyGatewayPriority);
+                addUnitToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Zealot, earlyGatewayPriority);
+            }
             addBuildingToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Nexus, Map::getMyNatural()->getTilePosition());
-            addBuildingToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Gateway, wall.gateway);
-            addUnitToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Zealot);
+            if (!gatewayFirst)
+            {
+                addBuildingToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Gateway, wall.gateway);
+                addUnitToGoals(prioritizedProductionGoals, BWAPI::UnitTypes::Protoss_Zealot);
+            }
             moveWorkerProductionToLowerPriority(prioritizedProductionGoals, 14);
             handleBnetPoolFirst(prioritizedProductionGoals, false);
             break;
@@ -752,6 +774,28 @@ void ForgeFastExpand::addPrioritizedProductionGoals(std::map<int, std::vector<Pr
             handleHydraBust(prioritizedProductionGoals);
             handleNonZergRush(prioritizedProductionGoals);
             handleBnetPoolFirst(prioritizedProductionGoals, true);
+
+            // Hydras confirmed, mutalisks not: more cannons at the wall, not around the nexus.
+            {
+                bool hydra = Units::hasEnemyBuilt(BWAPI::UnitTypes::Zerg_Hydralisk_Den)
+                             || Units::countEnemy(BWAPI::UnitTypes::Zerg_Hydralisk) > 0;
+                bool muta = Units::hasEnemyBuilt(BWAPI::UnitTypes::Zerg_Spire)
+                            || Units::countEnemy(BWAPI::UnitTypes::Zerg_Mutalisk) > 0;
+                if (BnetPolicy::pvzHydraNotMuta(hydra, muta))
+                {
+                    std::vector<BWAPI::TilePosition> entranceAvailable;
+                    int entranceCannons = currentWallCannons(prioritizedProductionGoals, entranceAvailable);
+                    int entranceTarget = BnetPolicy::pvzEntranceCannonTarget(hydra, muta, entranceCannons);
+                    if (entranceCannons < entranceTarget)
+                    {
+                        buildWallCannons(prioritizedProductionGoals,
+                                         entranceAvailable,
+                                         entranceTarget - entranceCannons,
+                                         0,
+                                         PRIORITY_BASEDEFENSE);
+                    }
+                }
+            }
 
             break;
         }

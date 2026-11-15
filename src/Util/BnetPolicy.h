@@ -441,12 +441,21 @@ namespace BnetPolicy
         return latchFrame >= 0 && frame >= latchFrame && frame < PvzAllInLatchUntilFrame;
     }
 
-    // FFE wall cannon target: upstream 2, raised to pool_first_cannons vs. pool first or an all-in
-    // (the all-in schedule itself is upstream: up to 5 by frame 6000)
+    // Early anti-ling wall cannons. Three is overkill on every map: the cap is 2, including a configured
+    // pool_first_cannons above 2. Hydra entrance cannons are a separate, later request.
     inline int pvzWallCannonTarget(bool enabled, bool poolFirstOrAllIn, int poolFirstCannons)
     {
-        if (!enabled || !poolFirstOrAllIn) return 2;
-        return poolFirstCannons > 2 ? poolFirstCannons : 2;
+        int target = 2;
+        if (enabled && poolFirstOrAllIn && poolFirstCannons > target) target = poolFirstCannons;
+        if (target > 2) target = 2;
+        return target;
+    }
+
+    // Once a pool-first opening is known, build the gateway and its first zealot before the natural nexus
+    // so the zealot is not waiting behind the 400-mineral expansion. Applies on every map.
+    inline bool pvzGatewayBeforeNexus(bool enabled, bool poolFirstOrAllIn)
+    {
+        return enabled && poolFirstOrAllIn;
     }
 
     // FFEDragoons minimum zealots: pool first -> pool_first_zealots; all-in -> allin_zealots or one per three known lings (at most 8)
@@ -505,19 +514,80 @@ namespace BnetPolicy
         Singularity,
         Stargate,
         Citadel,
-        Archives
+        LegSpeed,
+        Archives,
+        Storm,
+        HighTemplar
     };
 
+    // hydraNotMuta: a hydralisk den or hydralisk has been seen, and no spire or mutalisk has.
+    // That path is citadel, then leg speed the moment the citadel is complete, then archives, storm, and a high templar.
+    // A stargate is not placed ahead of the citadel. The same order is used on every map.
     inline PvzGasTech pvzNextGasTech(bool enabled, int gas, bool haveCore, bool rangeStartedOrDone, bool haveStargate,
-                                     bool haveCitadel, bool haveArchives)
+                                     bool haveCitadel, bool haveArchives, bool hydraNotMuta = false,
+                                     bool citadelCompleted = false, bool legStartedOrDone = false,
+                                     bool archivesCompleted = false, bool stormStartedOrDone = false,
+                                     bool haveTemplar = false)
     {
         if (!enabled) return PvzGasTech::None;
         if (!haveCore) return gas >= 50 ? PvzGasTech::CyberCore : PvzGasTech::None;
         if (!rangeStartedOrDone) return gas >= 150 ? PvzGasTech::Singularity : PvzGasTech::None;
+        if (hydraNotMuta)
+        {
+            if (!haveCitadel) return gas >= 100 ? PvzGasTech::Citadel : PvzGasTech::None;
+            if (!citadelCompleted) return PvzGasTech::None;
+            if (!legStartedOrDone) return gas >= 150 ? PvzGasTech::LegSpeed : PvzGasTech::None;
+            if (!haveArchives) return gas >= 200 ? PvzGasTech::Archives : PvzGasTech::None;
+            if (!archivesCompleted) return PvzGasTech::None;
+            if (!stormStartedOrDone) return gas >= 200 ? PvzGasTech::Storm : PvzGasTech::None;
+            if (!haveTemplar) return gas >= 150 ? PvzGasTech::HighTemplar : PvzGasTech::None;
+            return PvzGasTech::None;
+        }
         if (!haveStargate) return gas >= 150 ? PvzGasTech::Stargate : PvzGasTech::None;
         if (!haveCitadel) return gas >= 100 ? PvzGasTech::Citadel : PvzGasTech::None;
         if (!haveArchives) return gas >= 200 ? PvzGasTech::Archives : PvzGasTech::None;
         return PvzGasTech::None;
+    }
+
+    // Hydralisks are the confirmed threat and mutalisks are not. Spire or a mutalisk keeps the muta plan.
+    inline bool pvzHydraNotMuta(bool hydraConfirmed, bool mutaConfirmed)
+    {
+        return hydraConfirmed && !mutaConfirmed;
+    }
+
+    // Mineral-line cannons around a nexus. Off for a confirmed hydra attack that is not mutalisks.
+    inline bool pvzNexusCannons(bool hydraConfirmed, bool mutaConfirmed)
+    {
+        return !pvzHydraNotMuta(hydraConfirmed, mutaConfirmed);
+    }
+
+    // Wall / choke cannons once hydras are confirmed. Keeps whatever is already there, and raises the target to 4.
+    inline int pvzEntranceCannonTarget(bool hydraConfirmed, bool mutaConfirmed, int current)
+    {
+        if (!pvzHydraNotMuta(hydraConfirmed, mutaConfirmed)) return current;
+        return current < 4 ? 4 : current;
+    }
+
+    // Zealot share of the zealot+dragoon army. Against hydras, at least half.
+    inline double pvzHydraZealotRatio(bool hydraNotMuta, double lingBasedRatio)
+    {
+        if (!hydraNotMuta) return lingBasedRatio;
+        return lingBasedRatio > 0.5 ? lingBasedRatio : 0.5;
+    }
+
+    // Whether this cluster may attack the hydras in front of it.
+    // One to three dragoons, with no zealot and no high templar, do not walk into a larger hydra force.
+    // Dragoon-only groups need twice the hydras. A zealot+dragoon mix (high templars storm) needs
+    // 2*zealots + dragoons + 4*templars >= hydras. Used on every map.
+    inline bool pvzTakeHydraFight(int zealots, int dragoons, int templars, int hydras)
+    {
+        if (hydras <= 0) return true;
+        if (zealots < 0) zealots = 0;
+        if (dragoons < 0) dragoons = 0;
+        if (templars < 0) templars = 0;
+        if (zealots == 0 && templars == 0 && dragoons <= 3 && hydras > dragoons) return false;
+        if (zealots == 0 && templars == 0) return dragoons >= hydras * 2;
+        return (zealots * 2 + dragoons + templars * 4) >= hydras;
     }
 
     // ---------------------------------------------------------------------------------------------

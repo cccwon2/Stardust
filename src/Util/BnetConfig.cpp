@@ -286,7 +286,7 @@ namespace BnetConfig
         config.fleeGuardSpeedRatio = std::clamp(config.fleeGuardSpeedRatio, 1.0, 3.0);
         config.pvzAllinBaseLings = std::clamp(config.pvzAllinBaseLings, 0, 30);
         config.pvzAllinSeenLings = std::clamp(config.pvzAllinSeenLings, 0, 40);
-        config.pvzPoolFirstCannons = std::clamp(config.pvzPoolFirstCannons, 2, 5);
+        config.pvzPoolFirstCannons = std::clamp(config.pvzPoolFirstCannons, 2, 2);
         config.pvzPoolFirstZealots = std::clamp(config.pvzPoolFirstZealots, 0, 6);
         config.pvzAllinZealots = std::clamp(config.pvzAllinZealots, 0, 12);
         config.pvzAllinProbeCap = config.pvzAllinProbeCap <= 0 ? 0 : std::clamp(config.pvzAllinProbeCap, 12, 40);

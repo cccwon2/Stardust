@@ -688,6 +688,27 @@ void AttackBaseSquad::execute(UnitCluster &cluster)
             break;
     }
 
+    // Hydra fights, every map: 2-3 dragoons do not walk into a larger hydra force, and a zealot+dragoon
+    // mix attacks only when that composition is large enough.
+    if (BWAPI::Broodwar->enemy() && BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Zerg)
+    {
+        int zealots = 0;
+        int dragoons = 0;
+        int templars = 0;
+        int hydras = 0;
+        for (const auto &unit : cluster.units)
+        {
+            if (unit->type == BWAPI::UnitTypes::Protoss_Zealot) zealots++;
+            else if (unit->type == BWAPI::UnitTypes::Protoss_Dragoon) dragoons++;
+            else if (unit->type == BWAPI::UnitTypes::Protoss_High_Templar) templars++;
+        }
+        for (const auto &unit : enemyUnits)
+        {
+            if (unit->type == BWAPI::UnitTypes::Zerg_Hydralisk || unit->type == BWAPI::UnitTypes::Zerg_Lurker) hydras++;
+        }
+        if (!BnetPolicy::pvzTakeHydraFight(zealots, dragoons, templars, hydras)) attack = false;
+    }
+
     // Battle.net summary counters: attack <-> regroup transitions while the MidGameBio scales are active
     if (bnetBioScalesActive()) BnetLog::bioDecision(wasAttacking, attack || ignoreCombatSim);
     if (bnetMechScalesActive()) BnetLog::mechDecision(wasAttacking, attack || ignoreCombatSim);

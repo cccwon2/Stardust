@@ -431,9 +431,16 @@ int DefendBase::enemyAirThreatCannons(Base *baseToDefend)
         if (currentFrame > (expectedMutaliskCompletionFrame + flightTime - cannonBuildTime)) enemyAirThreat = true;
     }
 
-    // Main and natural are special cases, we only get cannons there to defend against air threats or sneak attacks
+    // Main and natural are special cases, we only get cannons there to defend against air threats or sneak attacks.
+    // Once hydralisks are confirmed and mutalisks are not, those mineral-line cannons stop on every map.
     if (baseToDefend == Map::getMyMain() || baseToDefend == Map::getMyNatural())
     {
+        bool hydra = Units::hasEnemyBuilt(BWAPI::UnitTypes::Zerg_Hydralisk_Den)
+                     || Units::countEnemy(BWAPI::UnitTypes::Zerg_Hydralisk) > 0;
+        bool muta = Units::hasEnemyBuilt(BWAPI::UnitTypes::Zerg_Spire)
+                    || Units::countEnemy(BWAPI::UnitTypes::Zerg_Mutalisk) > 0;
+        if (!BnetPolicy::pvzNexusCannons(hydra, muta)) return 0;
+
         if (enemyAirUnits > 6)
         {
             return std::max(1, 4 - (Units::countAll(BWAPI::UnitTypes::Protoss_Corsair) / 2));
