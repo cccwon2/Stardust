@@ -114,6 +114,13 @@ namespace BnetConfig
         int resourceFailBackoffFrames = 24;     // Worker resource order rejected by BWAPI: no resource order for N frames. 0 = off
         int supplyDropEvent = 20;               // [EVENT] supply_drop when supply falls by >= N within 30 game seconds. 0 = off
 
+        // Stacked minerals (OdysseyRE 2.0: several mineral fields on the same tile right next to the nexus)
+        bool stackedMineralIdentityFix = true;  // Track mineral fields per unit ID instead of one per build tile (applied at
+                                                // game start; upstream kept only the first field of a tile)
+        bool mineralAssignmentFix = true;       // Patch assignment accepts distance 0 (patch touching the depot), ties broken
+                                                // by ID; a miner without a patch near its base is not re-sent to the depot
+        bool miningAssignmentLog = true;        // [MINING] lines: resource registry, base patches, worker snapshots, failures
+
         // Phase 3: Lightweight log
         bool printBuildInfo = true;             // Local-only in-game message at game start: build id and config source
         bool bnetLog = true;                    // Write one-line summaries to bwapi-data/write/stardust_bnet.log

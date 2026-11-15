@@ -34,6 +34,10 @@ namespace BnetLog
     // Free-form event (e.g. opponent left, surrender)
     void event(const std::string &text);
 
+    // Mining diagnostics line ([MINING]: resource registry, base patches, worker snapshots, assignment failures).
+    // Written only with mining_assignment_log.
+    void mining(const std::string &text);
+
     // Call from onEnd
     void gameEnd(bool isWinner);
 

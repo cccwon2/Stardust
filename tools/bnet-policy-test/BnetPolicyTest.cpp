@@ -7,6 +7,7 @@
 
 #include <cstdio>
 #include <string>
+#include <vector>
 
 static int failures = 0;
 static int checks = 0;
@@ -590,6 +591,82 @@ namespace
         CHECK(!supplyDropDetected(57, 38, 20));
         CHECK(!supplyDropDetected(57, 0, 0));
     }
+
+    // Mirrors Workers::assignMineralPatch on patches given by their distance scores; returns how many of `workers`
+    // probes got a patch (2 per patch max)
+    int simulateAssignment(const std::vector<int> &scores, int workers, bool fix)
+    {
+        std::vector<int> load(scores.size(), 0);
+        int assigned = 0;
+        for (int w = 0; w < workers; w++)
+        {
+            bool patchWithoutWorkers = false;
+            for (int l : load) if (l == 0) patchWithoutWorkers = true;
+            int bestScore = patchWithoutWorkers ? 1 << 30 : 0;
+            int best = -1;
+            for (size_t i = 0; i < scores.size(); i++)
+            {
+                if (load[i] != (patchWithoutWorkers ? 0 : 1)) continue;
+                if (mineralScoreBetter(fix, best >= 0, patchWithoutWorkers, scores[i], bestScore, (int)i, best >= 0 ? best : 1 << 30))
+                {
+                    bestScore = scores[i];
+                    best = (int)i;
+                }
+            }
+            if (best >= 0)
+            {
+                load[best]++;
+                assigned++;
+            }
+        }
+        return assigned;
+    }
+
+    void testStackedMinerals()
+    {
+        // Registration: upstream drops further fields on an occupied tile
+        CHECK(registerResourceAtInit(true, true));
+        CHECK(registerResourceAtInit(false, false));
+        CHECK(!registerResourceAtInit(false, true));
+
+        // Matching: minerals by ID with the fix, first mineral of the tile without it; geysers by type
+        std::vector<ResourceKey> tile = {{10, true, false}, {11, true, false}, {12, true, true}};
+        CHECK(matchResource(tile, 11, true, true) == 1);
+        CHECK(matchResource(tile, 10, true, true) == 0);
+        CHECK(matchResource(tile, 12, true, true) == -1);   // destroyed
+        CHECK(matchResource(tile, 99, true, true) == -1);   // unknown field -> new resource
+        CHECK(matchResource(tile, 99, true, false) == 0);   // upstream: whatever is on the tile
+        CHECK(matchResource(tile, 11, true, false) == 1);
+        std::vector<ResourceKey> geyser = {{20, false, false}};
+        CHECK(matchResource(geyser, 77, false, true) == 0); // refinery on the geyser
+        CHECK(matchResource(geyser, 77, true, true) == -1);
+        CHECK(matchResource({}, 1, true, true) == -1);
+
+        // Scoring: second worker on a patch touching the depot (score 0)
+        CHECK(!mineralScoreBetter(false, false, false, 0, 0, 1, 1 << 30));   // upstream bug
+        CHECK(mineralScoreBetter(true, false, false, 0, 0, 1, 1 << 30));
+        CHECK(mineralScoreBetter(true, true, false, 5, 3, 9, 1));
+        CHECK(!mineralScoreBetter(true, true, false, 3, 5, 1, 9));
+        CHECK(mineralScoreBetter(true, true, true, 3, 3, 1, 9));             // tie -> lower ID
+        CHECK(!mineralScoreBetter(true, true, true, 3, 3, 9, 1));
+        CHECK(!mineralScoreBetter(false, true, true, 3, 3, 1, 9));           // upstream keeps the first
+        CHECK(mineralScoreBetter(false, false, true, 3, 1 << 30, 1, 1 << 30));
+
+        // OdysseyRE-like main: upstream registered one resource for the whole stack -> 1 probe mines
+        CHECK(simulateAssignment({0}, 4, false) == 1);
+        CHECK(simulateAssignment({0}, 4, true) == 2);
+        // With the identity fix every field is a patch: 8 fields touching the depot take 12 probes
+        CHECK(simulateAssignment(std::vector<int>(8, 0), 12, false) == 8);
+        CHECK(simulateAssignment(std::vector<int>(8, 0), 12, true) == 12);
+        CHECK(simulateAssignment(std::vector<int>(8, 0), 20, true) == 16);
+        // Normal main (no zero scores): fix changes nothing in the count
+        CHECK(simulateAssignment({32, 40, 48, 40, 32, 56, 64, 48}, 16, false) == 16);
+        CHECK(simulateAssignment({32, 40, 48, 40, 32, 56, 64, 48}, 16, true) == 16);
+
+        CHECK(sendIdleMinerToDepot(false, true));
+        CHECK(sendIdleMinerToDepot(true, false));
+        CHECK(!sendIdleMinerToDepot(true, true));
+    }
 }
 
 int main()
@@ -609,6 +686,7 @@ int main()
     testCombatFix();
     testAntiVulture();
     testPvpRobo();
+    testStackedMinerals();
 
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

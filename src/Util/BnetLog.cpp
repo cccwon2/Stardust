@@ -220,6 +220,11 @@ namespace BnetLog
                << " stuck_cmd_ok=" << rec.commandOk
                << " stuck_cmd_failed=" << rec.commandFailed
                << " stuck_budget_deferred=" << rec.budgetDeferred
+               << " mining_assign_ok=" << Workers::bnetMiningStats().assignOk
+               << " mining_assign_fail=" << Workers::bnetMiningStats().assignFail
+               << " mining_idle_holds=" << Workers::bnetMiningStats().idleHolds
+               << " mining_idle_depot_moves=" << Workers::bnetMiningStats().idleDepotMoves
+               << " mining_unassigned_long=" << Workers::bnetMiningStats().unassignedLong
                << " bio_to_attack=" << bioToAttack
                << " bio_to_regroup=" << bioToRegroup
                << " mech_to_attack=" << mechToAttack
@@ -511,6 +516,12 @@ namespace BnetLog
         writeLine("EVENT", text);
     }
 
+    void mining(const std::string &text)
+    {
+        if (!BnetConfig::get().miningAssignmentLog) return;
+        writeLine("MINING", text);
+    }
+
     void mechExpandGate(bool blocked, int bases, int armyUnits, int required)
     {
         int state = blocked ? 1 : 0;
@@ -556,6 +567,7 @@ namespace BnetLog
     void enemyStrategyChanged(const std::string &) {}
     void myStrategyChanged(const std::string &) {}
     void event(const std::string &) {}
+    void mining(const std::string &) {}
     void mechExpandGate(bool blocked, int, int, int)
     {
         int state = blocked ? 1 : 0;

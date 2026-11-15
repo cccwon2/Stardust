@@ -73,7 +73,30 @@ namespace Units
 
     bool hasEnemyBuilt(BWAPI::UnitType type);
 
+    // First (not destroyed) resource registered on the build tile
     Resource resourceAt(BWAPI::TilePosition tile);
+
+    // All (not destroyed) resources on the build tile; more than one mineral field only on stacked-mineral maps with
+    // stacked_mineral_identity_fix
+    std::vector<Resource> resourcesAt(BWAPI::TilePosition tile);
+
+    // Resource for a mineral field / geyser / refinery unit (minerals matched by unit ID with the identity fix)
+    Resource resourceFor(BWAPI::Unit bwapiUnit);
+
+    // Whether stacked_mineral_identity_fix was active when this game's resources were registered
+    bool stackedMineralIdentityFix();
+
+    struct ResourceRegistryStats
+    {
+        bool identityFix = true;
+        int mineralUnits = 0;        // Mineral field units at game start
+        int registeredMinerals = 0;  // Mineral resources registered at game start
+        int droppedMinerals = 0;     // Fields dropped because their tile was already taken (upstream behavior)
+        int stackedTiles = 0;        // Build tiles with more than one mineral field
+        int maxStack = 0;            // Most mineral fields on one tile
+        int lateRegistered = 0;      // Resources registered after game start (not found when first seen)
+    };
+    const ResourceRegistryStats &resourceRegistryStats();
 
     std::vector<Resource> myCompletedRefineries();
 

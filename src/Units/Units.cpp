@@ -18,6 +18,8 @@
 #include "Strategist.h"
 #include "Bullets.h"
 #include "OrderProcessTimer.h"
+#include "BnetConfig.h"
+#include "BnetPolicy.h"
 
 #include "DebugFlag_GridUpdates.h"
 
@@ -52,7 +54,25 @@ namespace Units
         bool logUnitsCreatedAndLost = true;
 #endif
 
-        std::map<BWAPI::TilePosition, Resource> tileToResource;
+        // All resources per build tile. Upstream kept one resource per tile; with stacked_mineral_identity_fix every mineral
+        // field is kept (OdysseyRE 2.0 stacks several fields on one tile). Geysers are always one per tile.
+        std::map<BWAPI::TilePosition, std::vector<Resource>> tileToResources;
+        bool identityFix = true;
+        ResourceRegistryStats registryStats;
+        std::unordered_set<const ResourceImpl *> resourcesSeenThisFrame;
+
+        Resource findResource(const BWAPI::Unit &bwapiUnit)
+        {
+            auto it = tileToResources.find(bwapiUnit->getTilePosition());
+            if (it == tileToResources.end()) return nullptr;
+
+            std::vector<BnetPolicy::ResourceKey> keys;
+            keys.reserve(it->second.size());
+            for (auto &r : it->second) keys.push_back({r->id, r->isMinerals, r->destroyed});
+
+            int index = BnetPolicy::matchResource(keys, bwapiUnit->getID(), bwapiUnit->getType().isMineralField(), identityFix);
+            return index < 0 ? nullptr : it->second[index];
+        }
 
         std::unordered_set<MyUnit> myUnits;
         std::unordered_set<Unit> enemyUnits;
@@ -75,24 +95,27 @@ namespace Units
 
         void updateResource(const BWAPI::Unit &bwapiUnit, const Unit &refinery = nullptr)
         {
-            auto it = tileToResource.find(bwapiUnit->getTilePosition());
-            if (it == tileToResource.end())
+            auto resource = findResource(bwapiUnit);
+            if (!resource)
             {
 #if LOGGING_ENABLED
                 Log::Get() << "ERROR: Resource not found for " << bwapiUnit->getType() << " @ " << bwapiUnit->getTilePosition();
 #endif
-                it = tileToResource.emplace(bwapiUnit->getTilePosition(), std::make_shared<ResourceImpl>(bwapiUnit)).first;
+                resource = std::make_shared<ResourceImpl>(bwapiUnit);
+                tileToResources[bwapiUnit->getTilePosition()].push_back(resource);
+                registryStats.lateRegistered++;
             }
+            resourcesSeenThisFrame.insert(resource.get());
 
             if (refinery)
             {
 #if DEBUG_RESOURCE_UPDATES
-                if (refinery != it->second->refinery)
+                if (refinery != resource->refinery)
                 {
                     CherryVis::log(bwapiUnit->getID()) << "Attached refinery " << *refinery;
                 }
 #endif
-                it->second->refinery = refinery;
+                resource->refinery = refinery;
 
                 // Break out if the refinery is owned by another player, as we aren't supposed to have access to resource counts
                 if (refinery->player != BWAPI::Broodwar->self()) return;
@@ -100,38 +123,41 @@ namespace Units
             else
             {
 #if DEBUG_RESOURCE_UPDATES
-                if (it->second->refinery)
+                if (resource->refinery)
                 {
-                    CherryVis::log(bwapiUnit->getID()) << "Detached refinery " << *it->second->refinery;
+                    CherryVis::log(bwapiUnit->getID()) << "Detached refinery " << *resource->refinery;
                 }
 #endif
-                it->second->refinery = nullptr;
+                resource->refinery = nullptr;
             }
 
 #if DEBUG_RESOURCE_UPDATES
-            if (bwapiUnit->getResources() != it->second->currentAmount)
+            if (bwapiUnit->getResources() != resource->currentAmount)
             {
                 CherryVis::log(bwapiUnit->getID())
-                    << "Resources updated from " << it->second->currentAmount << " to " << bwapiUnit->getResources();
+                    << "Resources updated from " << resource->currentAmount << " to " << bwapiUnit->getResources();
             }
 #endif
-            it->second->currentAmount = bwapiUnit->getResources();
+            resource->currentAmount = bwapiUnit->getResources();
 
-            it->second->lastSeenFrame = currentFrame;
+            resource->lastSeenFrame = currentFrame;
         }
 
-        void resourceDestroyed(const BWAPI::TilePosition &tile)
+        void resourceDestroyed(const Resource &resource)
         {
-            auto it = tileToResource.find(tile);
-            if (it == tileToResource.end()) return;
+            auto it = tileToResources.find(resource->tile);
+            if (it == tileToResources.end()) return;
 
 #if INSTRUMENTATION_ENABLED
-            CherryVis::log(it->second->id) << "Destroyed";
+            CherryVis::log(resource->id) << "Destroyed";
 #endif
-            it->second->destroyed = true;
-            it->second->currentAmount = 0;
-            Workers::onMineralPatchDestroyed(it->second);
-            tileToResource.erase(it);
+            resource->destroyed = true;
+            resource->currentAmount = 0;
+            Workers::onMineralPatchDestroyed(resource);
+
+            auto &onTile = it->second;
+            onTile.erase(std::remove(onTile.begin(), onTile.end(), resource), onTile.end());
+            if (onTile.empty()) tileToResources.erase(it);
         }
 
         void trackResearch(const BWAPI::Unit &bwapiUnit)
@@ -608,7 +634,11 @@ namespace Units
 
     void initialize()
     {
-        tileToResource.clear();
+        tileToResources.clear();
+        identityFix = BnetConfig::get().stackedMineralIdentityFix;
+        registryStats = ResourceRegistryStats();
+        registryStats.identityFix = identityFix;
+        resourcesSeenThisFrame.clear();
         myUnits.clear();
         enemyUnits.clear();
         unitIdToMyUnit.clear();
@@ -642,7 +672,44 @@ namespace Units
         {
             if (bwapiUnit->getType().isMineralField() || bwapiUnit->getType() == BWAPI::UnitTypes::Resource_Vespene_Geyser)
             {
-                tileToResource.emplace(bwapiUnit->getTilePosition(), std::make_shared<ResourceImpl>(bwapiUnit));
+                bool mineral = bwapiUnit->getType().isMineralField();
+                auto &onTile = tileToResources[bwapiUnit->getTilePosition()];
+                if (mineral) registryStats.mineralUnits++;
+                if (!BnetPolicy::registerResourceAtInit(identityFix, !onTile.empty()))
+                {
+                    // Upstream behavior: further fields on an occupied tile are dropped
+                    if (mineral) registryStats.droppedMinerals++;
+                    continue;
+                }
+                onTile.push_back(std::make_shared<ResourceImpl>(bwapiUnit));
+                if (mineral) registryStats.registeredMinerals++;
+            }
+        }
+
+        for (auto &[tile, onTile] : tileToResources)
+        {
+            int minerals = 0;
+            for (auto &r : onTile)
+            {
+                if (r->isMinerals) minerals++;
+            }
+            if (minerals > 1) registryStats.stackedTiles++;
+            registryStats.maxStack = std::max(registryStats.maxStack, minerals);
+        }
+        // Without the fix, dropped fields still mark their tile as stacked
+        if (!identityFix && registryStats.droppedMinerals > 0)
+        {
+            std::map<BWAPI::TilePosition, int> mineralsPerTile;
+            for (auto bwapiUnit : BWAPI::Broodwar->getNeutralUnits())
+            {
+                if (bwapiUnit->getType().isMineralField()) mineralsPerTile[bwapiUnit->getTilePosition()]++;
+            }
+            registryStats.stackedTiles = 0;
+            registryStats.maxStack = 0;
+            for (auto &[tile, count] : mineralsPerTile)
+            {
+                if (count > 1) registryStats.stackedTiles++;
+                registryStats.maxStack = std::max(registryStats.maxStack, count);
             }
         }
     }
@@ -936,25 +1003,31 @@ namespace Units
             enemyUnitDestroyed(unit);
         }
 
-        // Build a set of build tiles for mineral fields that should be visible
-        std::set<BWAPI::TilePosition> visibleMineralFieldTiles;
-        for (const auto &[tile, mineralField] : tileToResource)
+        // Build a list of mineral fields that should be visible (tile visible on this and the previous frame).
+        // Each field that is not seen below is mined out; with stacked minerals this is decided per field, not per tile.
+        std::vector<Resource> visibleMineralFields;
+        for (const auto &[tile, onTile] : tileToResources)
         {
-            if (!mineralField->isMinerals) continue;
+            bool tileVisible = BWAPI::Broodwar->isVisible(tile) && BWAPI::Broodwar->isVisible(tile + BWAPI::TilePosition(1, 0));
+            for (const auto &mineralField : onTile)
+            {
+                if (!mineralField->isMinerals) continue;
 
-            if (BWAPI::Broodwar->isVisible(tile) && BWAPI::Broodwar->isVisible(tile + BWAPI::TilePosition(1, 0)))
-            {
-                if (mineralField->tileSeenLastFrame)
+                if (tileVisible)
                 {
-                    visibleMineralFieldTiles.insert(tile);
+                    if (mineralField->tileSeenLastFrame)
+                    {
+                        visibleMineralFields.push_back(mineralField);
+                    }
+                    mineralField->tileSeenLastFrame = true;
                 }
-                mineralField->tileSeenLastFrame = true;
-            }
-            else
-            {
-                mineralField->tileSeenLastFrame = false;
+                else
+                {
+                    mineralField->tileSeenLastFrame = false;
+                }
             }
         }
+        resourcesSeenThisFrame.clear();
 
         // Update visible neutral units to detect addons that have gone neutral or refineries that have become geysers
         destroyedEnemyUnits.clear();
@@ -966,7 +1039,6 @@ namespace Units
             if (bwapiUnit->getType().isMineralField() || bwapiUnit->getType() == BWAPI::UnitTypes::Resource_Vespene_Geyser)
             {
                 updateResource(bwapiUnit);
-                visibleMineralFieldTiles.erase(bwapiUnit->getTilePosition());
             }
 
             auto it = unitIdToEnemyUnit.find(bwapiUnit->getID());
@@ -1009,9 +1081,10 @@ namespace Units
         }
 
         // Mark mineral fields destroyed if we should be able to see them but they aren't there
-        for (const auto &mineralFieldTile : visibleMineralFieldTiles)
+        for (const auto &mineralField : visibleMineralFields)
         {
-            resourceDestroyed(mineralFieldTile);
+            if (resourcesSeenThisFrame.contains(mineralField.get())) continue;
+            resourceDestroyed(mineralField);
         }
 
         assignEnemyUnitsToBases();
@@ -1519,20 +1592,56 @@ namespace Units
 
     Resource resourceAt(BWAPI::TilePosition tile)
     {
-        auto it = tileToResource.find(tile);
-        if (it == tileToResource.end()) return nullptr;
+        auto it = tileToResources.find(tile);
+        if (it == tileToResources.end()) return nullptr;
 
-        return it->second;
+        for (auto &resource : it->second)
+        {
+            if (!resource->destroyed) return resource;
+        }
+        return nullptr;
+    }
+
+    std::vector<Resource> resourcesAt(BWAPI::TilePosition tile)
+    {
+        std::vector<Resource> result;
+        auto it = tileToResources.find(tile);
+        if (it == tileToResources.end()) return result;
+
+        for (auto &resource : it->second)
+        {
+            if (!resource->destroyed) result.push_back(resource);
+        }
+        return result;
+    }
+
+    Resource resourceFor(BWAPI::Unit bwapiUnit)
+    {
+        if (!bwapiUnit) return nullptr;
+        return findResource(bwapiUnit);
+    }
+
+    bool stackedMineralIdentityFix()
+    {
+        return identityFix;
+    }
+
+    const ResourceRegistryStats &resourceRegistryStats()
+    {
+        return registryStats;
     }
 
     std::vector<Resource> myCompletedRefineries()
     {
         std::vector<Resource> result;
-        for (auto &[tile, resource] : tileToResource)
+        for (auto &[tile, onTile] : tileToResources)
         {
-            if (resource->hasMyCompletedRefinery())
+            for (auto &resource : onTile)
             {
-                result.emplace_back(resource);
+                if (resource->hasMyCompletedRefinery())
+                {
+                    result.emplace_back(resource);
+                }
             }
         }
 

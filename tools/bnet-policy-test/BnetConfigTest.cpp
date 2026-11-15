@@ -99,6 +99,11 @@ int main(){
   C(c.arrivedMoveHoldFrames==240 && c.arrivedMoveTolerancePx==0 && c.resourceFailBackoffFrames==240 && c.supplyDropEvent==0);
   w("{\"pvp_reexpand_frame\": 0, \"arrived_move_hold_frames\": 0}"); BnetConfig::initialize(); c=BnetConfig::get();
   C(c.pvpReexpandFrame==0 && c.arrivedMoveHoldFrames==0);
+  C(c.stackedMineralIdentityFix && c.mineralAssignmentFix && c.miningAssignmentLog);
+  w("{\"stacked_mineral_identity_fix\": false, \"mineral_assignment_fix\": false, \"mining_assignment_log\": \"bad\"}");
+  BnetConfig::initialize(); c=BnetConfig::get();
+  C(!c.stackedMineralIdentityFix && !c.mineralAssignmentFix && c.miningAssignmentLog);
+  C(BnetConfig::summary().find("stacked_mineral_identity_fix=0") != std::string::npos);
   printf("%s\n", BnetConfig::summary().c_str());
   printf("fails=%d\n",fails); return fails;
 }

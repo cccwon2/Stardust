@@ -3,6 +3,8 @@
 // Pure (BWAPI-free) decision helpers for the Battle.net / Pluto snipe changes.
 // Kept header-only and free of game dependencies so the branch logic can be unit-tested standalone
 // (see tools/bnet-policy-test/BnetPolicyTest.cpp).
+#include <vector>
+
 namespace BnetPolicy
 {
     // ---------------------------------------------------------------------------------------------
@@ -739,5 +741,64 @@ namespace BnetPolicy
     inline bool supplyDropDetected(int peakSupply, int currentSupply, int minDrop)
     {
         return minDrop > 0 && (peakSupply - currentSupply) >= minDrop;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Stacked minerals (OdysseyRE 2.0, 2026-11-15): several mineral fields on one build tile
+    // ---------------------------------------------------------------------------------------------
+
+    // Initial resource registration: upstream kept a single resource per build tile, so every further mineral field on
+    // the same tile was dropped. With the identity fix every field is registered.
+    inline bool registerResourceAtInit(bool identityFix, bool tileAlreadyHasResource)
+    {
+        return identityFix || !tileAlreadyHasResource;
+    }
+
+    struct ResourceKey
+    {
+        int id;
+        bool isMinerals;
+        bool destroyed;
+    };
+
+    // Picks which registered resource on a tile a visible neutral unit (or refinery) updates. Returns the index into
+    // `onTile`, or -1 when none matches (a new resource is then registered).
+    // - Minerals match by unit ID; without the identity fix the first mineral resource on the tile is used (upstream).
+    // - Geysers / refineries match the (single) non-mineral resource on the tile.
+    inline int matchResource(const std::vector<ResourceKey> &onTile, int unitId, bool unitIsMinerals, bool identityFix)
+    {
+        for (size_t i = 0; i < onTile.size(); i++)
+        {
+            auto &r = onTile[i];
+            if (r.destroyed || r.isMinerals != unitIsMinerals) continue;
+            if (!unitIsMinerals || r.id == unitId) return (int)i;
+        }
+        if (unitIsMinerals && !identityFix)
+        {
+            for (size_t i = 0; i < onTile.size(); i++)
+            {
+                if (!onTile[i].destroyed && onTile[i].isMinerals) return (int)i;
+            }
+        }
+        return -1;
+    }
+
+    // Mineral patch scoring in Workers::assignMineralPatch. First worker on a patch: lowest score wins; second worker:
+    // highest score wins. Upstream started the second-worker search at bestScore = 0 with a strict comparison, so a patch
+    // touching the depot (distance score 0) could never get its second worker. With the fix the first candidate is
+    // always accepted and equal scores are broken by the lower unit ID (deterministic).
+    inline bool mineralScoreBetter(bool fix, bool haveBest, bool lowerIsBetter, int score, int bestScore, int id, int bestId)
+    {
+        if (fix && !haveBest) return true;
+        if (score != bestScore) return lowerIsBetter ? score < bestScore : score > bestScore;
+        return fix && id < bestId;
+    }
+
+    // Miner in the Minerals / Gas job with nothing to do near its base: upstream cleared its state and re-sent it to the
+    // depot every few frames (probes circling the nexus on OdysseyRE). With the fix it only clears its state and waits
+    // for the next assignment.
+    inline bool sendIdleMinerToDepot(bool fix, bool simpleGather)
+    {
+        return !(fix && simpleGather);
     }
 }

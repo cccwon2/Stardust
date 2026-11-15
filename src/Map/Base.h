@@ -31,6 +31,11 @@ public:
     int minerals;   // Current total count of minerals remaining
     int gas;        // Current total count of gas remaining
 
+    // Mineral linking diagnostics (stacked minerals, logged as [MINING] base lines)
+    int bwemMineralCount = 0;       // Mineral fields BWEM assigned to this base
+    int duplicateMineralLinks = 0;  // BWEM fields that resolved to an already linked resource (skipped)
+    int stackedSiblingsAdded = 0;   // Stacked fields on a linked tile added although BWEM did not list them
+
     Base(BWAPI::TilePosition tile, const BWEM::Base *bwemBase);
 
     Base(BWAPI::TilePosition tile, const BWEM::Area *bwemArea, std::vector<Resource> mineralPatches, std::vector<Resource> geysers);
